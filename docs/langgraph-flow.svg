@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1020" viewBox="0 0 1600 1020" role="img" aria-labelledby="title desc">
+  <title id="title">LangGraph flow for PMO AI agent</title>
+  <desc id="desc">Diagram showing the invoke graph and confirmation graph used by the PMO AI agent API.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; rx: 18; filter: url(#shadow); }
+      .panel-title { font: 700 30px Arial, sans-serif; fill: #0f172a; }
+      .panel-subtitle { font: 400 17px Arial, sans-serif; fill: #475569; }
+      .node { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; rx: 12; filter: url(#shadow); }
+      .node-read { fill: #eff6ff; stroke: #2563eb; }
+      .node-write { fill: #f0fdf4; stroke: #16a34a; }
+      .node-response { fill: #fff7ed; stroke: #ea580c; }
+      .node-control { fill: #f8fafc; stroke: #64748b; }
+      .node-end { fill: #f1f5f9; stroke: #334155; }
+      .label { font: 700 18px Arial, sans-serif; fill: #0f172a; text-anchor: middle; dominant-baseline: middle; }
+      .small { font: 400 13px Arial, sans-serif; fill: #475569; text-anchor: middle; dominant-baseline: middle; }
+      .edge { fill: none; stroke: #334155; stroke-width: 2.4; marker-end: url(#arrow); }
+      .edge-green { fill: none; stroke: #15803d; stroke-width: 4; marker-end: url(#arrow-green); }
+      .edge-dashed { fill: none; stroke: #64748b; stroke-width: 2.2; stroke-dasharray: 8 7; marker-end: url(#arrow); }
+      .edge-label { font: 700 15px Arial, sans-serif; fill: #334155; }
+      .green-label { fill: #166534; }
+      .legend-title { font: 700 18px Arial, sans-serif; fill: #0f172a; }
+      .legend-text { font: 400 15px Arial, sans-serif; fill: #334155; }
+      .badge { fill: #dcfce7; stroke: #16a34a; stroke-width: 1.5; rx: 9; }
+      .badge-text { font: 700 14px Arial, sans-serif; fill: #166534; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1600" height="1020"/>
+  <text x="80" y="70" style="font: 800 38px Arial, sans-serif; fill: #0f172a;">PMO AI Agent - LangGraph Flow</text>
+  <text x="80" y="104" style="font: 400 18px Arial, sans-serif; fill: #475569;">Fluxo real definido em app/graph/builder.py, incluindo rota de leitura, rota de escrita e confirmação via MCP.</text>
+
+  <rect x="70" y="150" width="1460" height="570" class="panel"/>
+  <text x="105" y="198" class="panel-title">Invoke Graph</text>
+  <text x="105" y="226" class="panel-subtitle">Endpoint /agent/invoke: entende a mensagem, consulta ou prepara uma ação pendente.</text>
+
+  <rect x="122" y="286" width="190" height="74" class="node node-control"/>
+  <text x="217" y="316" class="label">load_context</text>
+  <text x="217" y="340" class="small">metadata + trace</text>
+
+  <rect x="377" y="286" width="210" height="74" class="node node-control"/>
+  <text x="482" y="316" class="label">classify_intent</text>
+  <text x="482" y="340" class="small">LLM + fallback local</text>
+
+  <rect x="662" y="284" width="210" height="78" class="node node-control"/>
+  <text x="767" y="313" class="label">route_by_intent</text>
+  <text x="767" y="338" class="small">read | write | respond</text>
+
+  <rect x="970" y="170" width="230" height="78" class="node node-read"/>
+  <text x="1085" y="199" class="label">call_mcp_read_tool</text>
+  <text x="1085" y="224" class="small">status, busca, bloqueios</text>
+
+  <rect x="958" y="430" width="215" height="78" class="node node-write"/>
+  <text x="1065" y="459" class="label">extract_entities</text>
+  <text x="1065" y="484" class="small">task_query + fields</text>
+
+  <rect x="1245" y="430" width="230" height="78" class="node node-write"/>
+  <text x="1360" y="458" class="label">validate_required_fields</text>
+  <text x="1360" y="484" class="small">task + fields/status/etc.</text>
+
+  <rect x="1245" y="565" width="230" height="78" class="node node-write"/>
+  <text x="1360" y="594" class="label">prepare_pending_action</text>
+  <text x="1360" y="619" class="small">salva ação pendente</text>
+
+  <rect x="958" y="565" width="215" height="78" class="node node-write"/>
+  <text x="1065" y="594" class="label">ask_confirmation</text>
+  <text x="1065" y="619" class="small">mensagem de confirmação</text>
+
+  <rect x="660" y="565" width="220" height="78" class="node node-response"/>
+  <text x="770" y="594" class="label">generate_response</text>
+  <text x="770" y="619" class="small">resposta final ao canal</text>
+
+  <rect x="415" y="572" width="96" height="64" class="node node-end"/>
+  <text x="463" y="604" class="label">END</text>
+
+  <path d="M312 323 L377 323" class="edge"/>
+  <path d="M587 323 L662 323" class="edge"/>
+  <path d="M872 306 C925 276, 944 229, 970 211" class="edge"/>
+  <text x="920" y="264" class="edge-label">read</text>
+  <path d="M872 338 C918 370, 929 439, 958 463" class="edge-green"/>
+  <text x="914" y="405" class="edge-label green-label">write</text>
+  <path d="M767 362 C767 430, 768 505, 769 565" class="edge-dashed"/>
+  <text x="784" y="470" class="edge-label">respond</text>
+  <path d="M1085 248 C1085 350, 930 498, 805 565" class="edge"/>
+  <path d="M1173 469 L1245 469" class="edge-green"/>
+  <path d="M1360 508 L1360 565" class="edge-green"/>
+  <path d="M1245 604 L1173 604" class="edge-green"/>
+  <path d="M958 604 L880 604" class="edge-green"/>
+  <path d="M660 604 L511 604" class="edge"/>
+
+  <rect x="95" y="648" width="585" height="44" class="badge"/>
+  <text x="112" y="676" class="badge-text">Caminho do teste: TASK_UPDATE -> task_query "Configurar lembrete automatico" -> due_date "hoje"</text>
+
+  <rect x="70" y="765" width="1460" height="185" class="panel"/>
+  <text x="105" y="813" class="panel-title">Confirmation Graph</text>
+  <text x="105" y="841" class="panel-subtitle">Endpoint /agent/confirm: confirma a ação pendente e executa a escrita no board via MCP.</text>
+
+  <rect x="320" y="875" width="230" height="64" class="node node-control"/>
+  <text x="435" y="907" class="label">load_pending_action</text>
+
+  <rect x="690" y="875" width="260" height="64" class="node node-write"/>
+  <text x="820" y="898" class="label">execute_mcp_write_tool</text>
+  <text x="820" y="920" class="small">board_update_task via MCP</text>
+
+  <rect x="1090" y="875" width="250" height="64" class="node node-response"/>
+  <text x="1215" y="898" class="label">generate_response</text>
+  <text x="1215" y="920" class="small">sucesso ou erro</text>
+
+  <rect x="1420" y="875" width="72" height="64" class="node node-end"/>
+  <text x="1456" y="907" class="label">END</text>
+
+  <path d="M550 907 L690 907" class="edge-green"/>
+  <path d="M950 907 L1090 907" class="edge-green"/>
+  <path d="M1340 907 L1420 907" class="edge"/>
+
+  <rect x="1010" y="70" width="480" height="74" class="node"/>
+  <text x="1038" y="101" class="legend-title">Legenda</text>
+  <circle cx="1045" cy="124" r="7" fill="#16a34a"/>
+  <text x="1064" y="129" class="legend-text">rota de escrita usada no teste de alterar data</text>
+  <circle cx="1325" cy="124" r="7" fill="#2563eb"/>
+  <text x="1344" y="129" class="legend-text">consulta MCP read-only</text>
+</svg>
