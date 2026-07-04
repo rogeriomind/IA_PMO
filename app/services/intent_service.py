@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.graph.prompts import CLASSIFIER_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT
@@ -43,7 +45,11 @@ class IntentService:
                         ("human", message),
                     ]
                 )
-                return IntentClassification.model_validate(result)
+                classification = IntentClassification.model_validate(result)
+                local = self._classify_locally(message)
+                if classification.intent == Intent.UNKNOWN and local.intent != Intent.UNKNOWN:
+                    return local
+                return classification
             except Exception:
                 logger.exception("Intent classification via %s failed; using local fallback", self.settings.llm_provider)
         return self._classify_locally(message)
@@ -57,7 +63,9 @@ class IntentService:
                         ("human", f"Intent: {intent.value}\nMensagem: {message}"),
                     ]
                 )
-                return TaskEntities.model_validate(result)
+                entities = TaskEntities.model_validate(result)
+                local_entities = self._extract_locally(message, intent)
+                return self._merge_entities(entities, local_entities)
             except Exception:
                 logger.exception("Entity extraction via %s failed; using local fallback", self.settings.llm_provider)
         return self._extract_locally(message, intent)
@@ -114,7 +122,10 @@ class IntentService:
         if re.search(r"\b(comenta|coment[aá]rio|adiciona coment[aá]rio)\b", text):
             return IntentClassification(intent=Intent.TASK_COMMENT, confidence=0.84, reason="Pedido de comentario em tarefa")
 
-        if re.search(r"\b(atualiza|atualizar|altera|alterar|edita|muda prioridade|troca respons)\b", text):
+        if re.search(
+            r"\b(atualiza|atualizar|altera|alterar|altere|edita|muda prioridade|muda data|troca respons|troca data)\b",
+            text,
+        ):
             return IntentClassification(intent=Intent.TASK_UPDATE, confidence=0.82, reason="Pedido de atualizacao de tarefa")
 
         if re.search(r"\b(status|andamento|resumo|bloqueios?|proximos passos|pr[oó]ximos passos)\b", text):
@@ -181,6 +192,17 @@ class IntentService:
 
     @staticmethod
     def _extract_due_date(message: str) -> str | None:
+        relative = re.search(r"\bpara\s+(hoje|amanh.)\b", message, flags=re.IGNORECASE)
+        if relative:
+            base = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+            if relative.group(1).casefold().startswith("amanh"):
+                base = base + timedelta(days=1)
+            return base.isoformat()
+
+        date_match = re.search(r"\bpara\s+(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\b", message)
+        if date_match:
+            return IntentService._normalize_date(date_match.group(1))
+
         match = re.search(r"\bprazo\s+(?:para\s+)?([^,.;]+)", message, flags=re.IGNORECASE)
         return match.group(1).strip() if match else None
 
@@ -225,6 +247,7 @@ class IntentService:
     @staticmethod
     def _extract_task_reference(message: str) -> str | None:
         patterns = [
+            r"\b(?:data|prazo|vencimento)\s+d[ao]\s+(.+?)\s+para\s+",
             r"\b(?:tarefa|task|card)\s+(.+?)\s+para\s+",
             r"\b(?:tarefa|task|card)\s+(.+?)(?:\s+com|\s*:|$)",
             r"\b#([A-Za-z0-9_-]+)\b",
@@ -246,3 +269,28 @@ class IntentService:
     @staticmethod
     def _looks_like_id(value: str) -> bool:
         return bool(re.fullmatch(r"#?[A-Z]{1,10}-?\d{1,10}|[0-9a-fA-F-]{24,36}", value.strip()))
+
+    @staticmethod
+    def _normalize_date(value: str) -> str:
+        clean = value.strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", clean):
+            return clean
+        match = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", clean)
+        if not match:
+            return clean
+        day, month, year = match.groups()
+        if len(year) == 2:
+            year = "20" + year
+        return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+    @staticmethod
+    def _merge_entities(primary: TaskEntities, fallback: TaskEntities) -> TaskEntities:
+        merged = primary.model_copy(deep=True)
+        for field_name in TaskEntities.model_fields:
+            primary_value = getattr(merged, field_name)
+            fallback_value = getattr(fallback, field_name)
+            if primary_value in (None, {}, []) and fallback_value not in (None, {}, []):
+                setattr(merged, field_name, fallback_value)
+        if not merged.fields and fallback.fields:
+            merged.fields = fallback.fields
+        return merged

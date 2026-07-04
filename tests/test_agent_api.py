@@ -1,4 +1,6 @@
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -153,6 +155,43 @@ def test_confirm_true_executes_mocked_mcp_write(client):
     assert body["executed"] is True
     assert body["board_result"]["id"] == "TASK-2"
     assert len(client.fake_tools.write_calls) == 1
+
+
+def test_change_task_date_to_today_generates_update_and_confirms(client):
+    today = datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
+    invoke = client.post(
+        "/agent/invoke",
+        json={
+            "conversation_id": "whatsapp_date",
+            "user_id": "1",
+            "channel": "whatsapp",
+            "message": "altere a data do Configurar lembrete automatico para hoje",
+            "metadata": {"project_id": "pmo-agent"},
+        },
+    )
+
+    assert invoke.status_code == 200
+    invoke_body = invoke.json()
+    assert invoke_body["intent"] == "TASK_UPDATE"
+    assert invoke_body["requires_confirmation"] is True
+    assert invoke_body["action"]["type"] == "update_task"
+    assert invoke_body["action"]["payload"]["task_query"] == "Configurar lembrete automatico"
+    assert invoke_body["action"]["payload"]["fields"]["due_date"] == today
+
+    confirm = client.post(
+        "/agent/confirm",
+        json={
+            "conversation_id": "whatsapp_date",
+            "user_id": "1",
+            "pending_action_id": invoke_body["pending_action_id"],
+            "confirmed": True,
+        },
+    )
+
+    assert confirm.status_code == 200
+    assert confirm.json()["executed"] is True
+    assert client.fake_tools.write_calls[-1][0] == "update_task"
+    assert client.fake_tools.write_calls[-1][2]["due_date"] == today
 
 
 def test_agent_process_returns_legacy_agent_result_for_create(client):

@@ -10,6 +10,8 @@ class FakeClient:
 
     async def call_semantic_tool(self, internal_name, arguments, *, read_only):
         self.calls.append((internal_name, arguments, read_only))
+        if internal_name == "search_tasks":
+            return {"tasks": [{"id": "TASK-1", "title": "Configurar lembrete automatico"}]}
         return arguments
 
 
@@ -34,6 +36,22 @@ async def test_create_task_normalizes_priority_before_mcp_call():
 
     assert result["priority"] == "LOW"
     assert fake_client.calls[0][0] == "create_task"
+
+
+@pytest.mark.asyncio
+async def test_update_task_normalizes_due_date_before_mcp_call():
+    fake_client = FakeClient()
+    board_tools = BoardTools(fake_client)
+
+    result = await board_tools.update_task(
+        task_id=None,
+        task_query="Configurar lembrete automatico",
+        fields={"due_date": "2026-07-04"},
+    )
+
+    assert result == {"id": "TASK-1", "dueDate": "2026-07-04"}
+    assert fake_client.calls[0] == ("search_tasks", {"search": "Configurar lembrete automatico"}, True)
+    assert fake_client.calls[1][0] == "update_task"
 
 
 def test_mcp_error_result_raises_runtime_error():
