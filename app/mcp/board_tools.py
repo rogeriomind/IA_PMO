@@ -5,8 +5,69 @@ from typing import Any
 from app.mcp.client import MCPBoardClient
 
 
+PRIORITY_MAP = {
+    "LOW": "LOW",
+    "BAIXA": "LOW",
+    "LOW_PRIORITY": "LOW",
+    "MEDIUM": "MEDIUM",
+    "MEDIA": "MEDIUM",
+    "MÉDIA": "MEDIUM",
+    "NORMAL": "MEDIUM",
+    "HIGH": "HIGH",
+    "ALTA": "HIGH",
+    "URGENTE": "CRITICAL",
+    "CRITICAL": "CRITICAL",
+    "CRITICA": "CRITICAL",
+    "CRÍTICA": "CRITICAL",
+}
+
+STATUS_MAP = {
+    "TODO": "TODO",
+    "A FAZER": "TODO",
+    "BACKLOG": "TODO",
+    "IN_PROGRESS": "IN_PROGRESS",
+    "EM ANDAMENTO": "IN_PROGRESS",
+    "ANDAMENTO": "IN_PROGRESS",
+    "REVIEW": "REVIEW",
+    "REVISAO": "REVIEW",
+    "REVISÃO": "REVIEW",
+    "DONE": "DONE",
+    "CONCLUIDO": "DONE",
+    "CONCLUÍDO": "DONE",
+    "FEITO": "DONE",
+    "BLOCKED": "BLOCKED",
+    "BLOQUEADO": "BLOCKED",
+}
+
+
 def drop_none(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value is not None}
+
+
+def normalize_priority(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    key = value.strip().upper().replace("-", "_")
+    return PRIORITY_MAP.get(key, value)
+
+
+def normalize_status(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    key = value.strip().upper().replace("-", "_")
+    return STATUS_MAP.get(key, value)
+
+
+def normalize_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    if "priority" in normalized:
+        normalized["priority"] = normalize_priority(normalized["priority"])
+    if "status" in normalized:
+        normalized["status"] = normalize_status(normalized["status"])
+    fields = normalized.get("fields")
+    if isinstance(fields, dict):
+        normalized["fields"] = normalize_task_payload(fields)
+    return normalized
 
 
 class BoardTools:
@@ -24,7 +85,7 @@ class BoardTools:
         return await self.client.call_semantic_tool("get_task", {"task_id": task_id}, read_only=True)
 
     async def create_task(self, payload: dict[str, Any], idempotency_key: str | None = None) -> Any:
-        arguments = drop_none({**payload, "idempotency_key": idempotency_key})
+        arguments = drop_none({**normalize_task_payload(payload), "idempotency_key": idempotency_key})
         return await self.client.call_semantic_tool("create_task", arguments, read_only=False)
 
     async def update_task(
@@ -39,7 +100,7 @@ class BoardTools:
             {
                 "task_id": task_id,
                 "task_query": task_query,
-                "fields": fields,
+                "fields": normalize_task_payload(fields),
                 "idempotency_key": idempotency_key,
             }
         )
@@ -57,7 +118,7 @@ class BoardTools:
             {
                 "task_id": task_id,
                 "task_query": task_query,
-                "status": status,
+                "status": normalize_status(status),
                 "idempotency_key": idempotency_key,
             }
         )
@@ -101,4 +162,3 @@ class BoardTools:
             drop_none({"user_id": user_id, "project_id": project_id}),
             read_only=True,
         )
-

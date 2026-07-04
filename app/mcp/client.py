@@ -267,6 +267,7 @@ class MCPBoardClient:
         else:
             return result
 
+        is_error = bool(dumped.get("isError") or dumped.get("is_error"))
         content = dumped.get("content")
         if isinstance(content, list):
             normalized = []
@@ -280,6 +281,13 @@ class MCPBoardClient:
                 else:
                     normalized.append(item)
             if len(normalized) == 1:
-                return normalized[0]
+                single = normalized[0]
+                if is_error or (isinstance(single, str) and single.startswith("MCP error")):
+                    raise RuntimeError(str(single))
+                return single
+            if is_error:
+                raise RuntimeError(json.dumps(normalized, ensure_ascii=False))
             return normalized
+        if is_error:
+            raise RuntimeError(json.dumps(dumped, ensure_ascii=False))
         return dumped
