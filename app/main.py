@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.graph.builder import build_confirmation_graph, build_invoke_graph
 from app.graph.nodes import AgentGraphNodes
 from app.mcp.board_tools import BoardTools
+from app.mcp.board_tools import normalize_priority, normalize_status
 from app.mcp.client import MCPBoardClient
 from app.observability.langfuse import LangfuseTracer
 from app.schemas import (
@@ -18,6 +19,9 @@ from app.schemas import (
     AgentConfirmResponse,
     AgentInvokeRequest,
     AgentInvokeResponse,
+    ExternalAgentProcessRequest,
+    ExternalAgentProcessResponse,
+    ExternalBoardAction,
     HealthResponse,
     Intent,
 )
@@ -28,6 +32,29 @@ from app.services.response_service import ResponseService
 from app.storage.repository import PendingActionRepository
 
 logger = logging.getLogger(__name__)
+
+
+LEGACY_INTENT_BY_INTENT = {
+    Intent.TASK_CREATE: "create_task",
+    Intent.TASK_UPDATE: "update_task",
+    Intent.TASK_MOVE: "move_activity",
+    Intent.TASK_COMMENT: "add_comment",
+    Intent.STATUS_BOARD: "query_tasks",
+    Intent.BOARD_QUESTION: "query_tasks",
+    Intent.SMALLTALK: "unknown",
+    Intent.UNKNOWN: "unknown",
+}
+
+LEGACY_ACTION_BY_INTENT = {
+    Intent.TASK_CREATE: "create_activity",
+    Intent.TASK_UPDATE: "update_activity",
+    Intent.TASK_MOVE: "move_activity",
+    Intent.TASK_COMMENT: "add_comment",
+    Intent.STATUS_BOARD: "query_activities",
+    Intent.BOARD_QUESTION: "query_activities",
+    Intent.SMALLTALK: "unknown",
+    Intent.UNKNOWN: "unknown",
+}
 
 
 def create_app(
@@ -163,6 +190,64 @@ def create_app(
             tracer.update_trace(trace, output=response.model_dump(mode="json"))
             return response
 
+    @api.post("/agent/process", response_model=ExternalAgentProcessResponse)
+    async def agent_process(payload: ExternalAgentProcessRequest) -> ExternalAgentProcessResponse:
+        """Compatibility endpoint for the existing PMO Agent ExternalAgentService contract."""
+        tracer: LangfuseTracer = api.state.tracer
+        trace = tracer.start_trace(
+            name="agent.process",
+            session_id=payload.conversation_id,
+            user_id=payload.user_id or "unknown",
+            metadata={
+                "compatibility": "external_agent_service",
+                "project_id": payload.context.get("project_id") or payload.context.get("projectId"),
+            },
+            input_payload=payload.model_dump(),
+        )
+        try:
+            classification = await api.state.intent_service.classify(payload.input_text)
+            entities = {}
+            if classification.intent in {
+                Intent.TASK_CREATE,
+                Intent.TASK_UPDATE,
+                Intent.TASK_MOVE,
+                Intent.TASK_COMMENT,
+            }:
+                extracted = await api.state.intent_service.extract_entities(
+                    payload.input_text,
+                    classification.intent,
+                )
+                entities = extracted.model_dump(exclude_none=True)
+            response = _build_external_agent_response(
+                intent=classification.intent,
+                confidence=classification.confidence,
+                entities=entities,
+                context=payload.context,
+                input_text=payload.input_text,
+            )
+            tracer.update_trace(
+                trace,
+                metadata={
+                    "intent": classification.intent.value,
+                    "confidence": classification.confidence,
+                    "compatibility": "external_agent_service",
+                },
+                output=response.model_dump(mode="json"),
+            )
+            return response
+        except Exception:
+            logger.exception("Unhandled error in /agent/process")
+            response = ExternalAgentProcessResponse(
+                intent="unknown",
+                confidence=0.0,
+                requires_confirmation=False,
+                response_text=ResponseService.error_response(),
+                board_action=ExternalBoardAction(type="unknown", payload={}),
+                missing_fields=[],
+            )
+            tracer.update_trace(trace, output=response.model_dump(mode="json"))
+            return response
+
     @api.post("/agent/confirm", response_model=AgentConfirmResponse)
     async def agent_confirm(payload: AgentConfirmRequest) -> AgentConfirmResponse:
         tracer: LangfuseTracer = api.state.tracer
@@ -205,3 +290,160 @@ def create_app(
 
 
 app = create_app()
+
+
+def _build_external_agent_response(
+    *,
+    intent: Intent,
+    confidence: float,
+    entities: dict[str, Any],
+    context: dict[str, Any],
+    input_text: str,
+) -> ExternalAgentProcessResponse:
+    legacy_intent = LEGACY_INTENT_BY_INTENT.get(intent, "unknown")
+    action_type = _legacy_action_type(intent, input_text)
+    missing_fields = _legacy_missing_fields(intent, entities)
+    payload = _legacy_payload(intent, entities, context, input_text)
+
+    requires_confirmation = intent in {
+        Intent.TASK_CREATE,
+        Intent.TASK_UPDATE,
+        Intent.TASK_MOVE,
+        Intent.TASK_COMMENT,
+    } and not missing_fields
+
+    return ExternalAgentProcessResponse(
+        intent=legacy_intent,
+        confidence=confidence,
+        requires_confirmation=requires_confirmation,
+        response_text=_legacy_response_text(intent, missing_fields),
+        board_action=ExternalBoardAction(type=action_type, payload=payload),
+        missing_fields=missing_fields,
+    )
+
+
+def _legacy_action_type(intent: Intent, input_text: str) -> str:
+    text = input_text.casefold()
+    if intent in {Intent.STATUS_BOARD, Intent.BOARD_QUESTION} and (
+        "alerta" in text or "atras" in text or "bloque" in text
+    ):
+        return "query_alerts"
+    return LEGACY_ACTION_BY_INTENT.get(intent, "unknown")
+
+
+def _legacy_missing_fields(intent: Intent, entities: dict[str, Any]) -> list[str]:
+    missing = []
+    if intent == Intent.TASK_CREATE:
+        if not entities.get("title"):
+            missing.append("title")
+    elif intent == Intent.TASK_UPDATE:
+        if not (entities.get("task_id") or entities.get("task_query")):
+            missing.append("task")
+        if not entities.get("fields"):
+            missing.append("fields")
+    elif intent == Intent.TASK_MOVE:
+        if not (entities.get("task_id") or entities.get("task_query")):
+            missing.append("task")
+        if not entities.get("status"):
+            missing.append("status")
+    elif intent == Intent.TASK_COMMENT:
+        if not (entities.get("task_id") or entities.get("task_query")):
+            missing.append("task")
+        if not entities.get("comment"):
+            missing.append("comment")
+    return missing
+
+
+def _legacy_payload(
+    intent: Intent,
+    entities: dict[str, Any],
+    context: dict[str, Any],
+    input_text: str,
+) -> dict[str, Any]:
+    project_id = context.get("project_id") or context.get("projectId")
+
+    if intent == Intent.TASK_CREATE:
+        return _drop_none(
+            {
+                "title": entities.get("title"),
+                "description": entities.get("description") or entities.get("title"),
+                "status": normalize_status(entities.get("status")) if entities.get("status") else None,
+                "priority": normalize_priority(entities.get("priority")) if entities.get("priority") else None,
+                "assigneeName": entities.get("assignee"),
+                "dueDate": entities.get("due_date"),
+                "projectId": project_id,
+            }
+        )
+
+    if intent == Intent.TASK_UPDATE:
+        fields = entities.get("fields") or {}
+        normalized_fields = {
+            key: normalize_priority(value) if key == "priority" else normalize_status(value) if key == "status" else value
+            for key, value in fields.items()
+        }
+        return _drop_none(
+            {
+                "taskId": entities.get("task_id"),
+                "taskQuery": entities.get("task_query"),
+                "fields": normalized_fields,
+                "projectId": project_id,
+            }
+        )
+
+    if intent == Intent.TASK_MOVE:
+        return _drop_none(
+            {
+                "taskId": entities.get("task_id"),
+                "taskQuery": entities.get("task_query"),
+                "status": normalize_status(entities.get("status")) if entities.get("status") else None,
+                "projectId": project_id,
+            }
+        )
+
+    if intent == Intent.TASK_COMMENT:
+        return _drop_none(
+            {
+                "taskId": entities.get("task_id"),
+                "taskQuery": entities.get("task_query"),
+                "comment": entities.get("comment"),
+                "projectId": project_id,
+            }
+        )
+
+    if intent in {Intent.STATUS_BOARD, Intent.BOARD_QUESTION}:
+        return _drop_none({"query": input_text, "projectId": project_id})
+
+    return {}
+
+
+def _legacy_response_text(intent: Intent, missing_fields: list[str]) -> str:
+    if missing_fields:
+        if "title" in missing_fields:
+            return "Qual e o titulo da atividade?"
+        if "task" in missing_fields:
+            return "Qual atividade voce quer alterar? Envie o ID ou o titulo."
+        if "status" in missing_fields:
+            return "Para qual status voce quer mover essa atividade?"
+        if "comment" in missing_fields:
+            return "Qual comentario voce quer adicionar?"
+        if "fields" in missing_fields:
+            return "O que voce quer atualizar nessa atividade?"
+        return "Preciso de mais detalhes para continuar."
+
+    if intent == Intent.TASK_CREATE:
+        return "Confirma a criacao da atividade?"
+    if intent == Intent.TASK_UPDATE:
+        return "Confirma a atualizacao da atividade?"
+    if intent == Intent.TASK_MOVE:
+        return "Confirma a movimentacao da atividade?"
+    if intent == Intent.TASK_COMMENT:
+        return "Confirma a inclusao do comentario?"
+    if intent in {Intent.STATUS_BOARD, Intent.BOARD_QUESTION}:
+        return "Vou consultar as atividades do board."
+    if intent == Intent.SMALLTALK:
+        return "Posso ajudar com status, criacao ou atualizacao de atividades."
+    return "Nao entendi bem. Pode reformular?"
+
+
+def _drop_none(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if value is not None}

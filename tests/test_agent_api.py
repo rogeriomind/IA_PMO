@@ -153,3 +153,64 @@ def test_confirm_true_executes_mocked_mcp_write(client):
     assert body["executed"] is True
     assert body["board_result"]["id"] == "TASK-2"
     assert len(client.fake_tools.write_calls) == 1
+
+
+def test_agent_process_returns_legacy_agent_result_for_create(client):
+    response = client.post(
+        "/agent/process",
+        json={
+            "conversation_id": "c1",
+            "user_id": "u1",
+            "input_text": "cria uma tarefa para revisar o deploy com prioridade alta",
+            "context": {"project_id": "pmo-agent"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "create_task"
+    assert body["requires_confirmation"] is True
+    assert body["response_text"] == "Confirma a criacao da atividade?"
+    assert body["board_action"]["type"] == "create_activity"
+    assert body["board_action"]["payload"]["title"] == "revisar o deploy"
+    assert body["board_action"]["payload"]["priority"] == "HIGH"
+    assert body["board_action"]["payload"]["projectId"] == "pmo-agent"
+    assert body["missing_fields"] == []
+
+
+def test_agent_process_create_without_title_returns_missing_field(client):
+    response = client.post(
+        "/agent/process",
+        json={
+            "conversation_id": "c1",
+            "user_id": "u1",
+            "input_text": "cria uma tarefa",
+            "context": {},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "create_task"
+    assert body["requires_confirmation"] is False
+    assert body["board_action"]["type"] == "create_activity"
+    assert body["missing_fields"] == ["title"]
+
+
+def test_agent_process_status_returns_query_action(client):
+    response = client.post(
+        "/agent/process",
+        json={
+            "conversation_id": "c1",
+            "user_id": "u1",
+            "input_text": "qual o status do projeto onboarding?",
+            "context": {"project_id": "onboarding"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "query_tasks"
+    assert body["requires_confirmation"] is False
+    assert body["board_action"]["type"] == "query_activities"
+    assert body["board_action"]["payload"]["projectId"] == "onboarding"

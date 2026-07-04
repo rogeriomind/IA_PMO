@@ -156,6 +156,42 @@ curl -X POST http://localhost:8010/agent/invoke \
 
 Para escrita, a resposta deve vir com `requires_confirmation=true` e `pending_action_id`.
 
+## Testar /agent/process
+
+Este endpoint existe para compatibilidade com o `ExternalAgentService` descrito em `/opt/shared/conectar_ia_servico_externo.md`. Ele nao executa MCP nem cria pending action; apenas devolve um `AgentResult` estruturado para o worker antigo.
+
+```bash
+curl -X POST http://localhost:8010/agent/process \
+  -H "Content-Type: application/json" \
+  -d '{
+    "conversation_id": "whatsapp_5511999999999",
+    "user_id": "5511999999999",
+    "input_text": "Cria uma tarefa para revisar o deploy com prioridade alta",
+    "context": {"project_id": "pmo-agent"}
+  }'
+```
+
+Resposta esperada:
+
+```json
+{
+  "intent": "create_task",
+  "confidence": 0.9,
+  "requires_confirmation": true,
+  "response_text": "Confirma a criacao da atividade?",
+  "board_action": {
+    "type": "create_activity",
+    "payload": {
+      "title": "revisar o deploy",
+      "description": "revisar o deploy",
+      "priority": "HIGH",
+      "projectId": "pmo-agent"
+    }
+  },
+  "missing_fields": []
+}
+```
+
 ## Testar /agent/confirm
 
 ```bash

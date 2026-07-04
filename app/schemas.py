@@ -59,6 +59,27 @@ class AgentConfirmResponse(BaseModel):
     board_result: dict[str, Any] | list[Any] | str | None = None
 
 
+class ExternalAgentProcessRequest(BaseModel):
+    conversation_id: str = Field(min_length=1)
+    user_id: str | None = None
+    input_text: str = Field(min_length=1)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExternalBoardAction(BaseModel):
+    type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExternalAgentProcessResponse(BaseModel):
+    intent: str
+    confidence: float = Field(ge=0, le=1)
+    requires_confirmation: bool
+    response_text: str
+    board_action: ExternalBoardAction
+    missing_fields: list[str] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     status: str
     service: str
@@ -86,4 +107,3 @@ class TaskEntities(BaseModel):
     task_query: str | None = None
     comment: str | None = None
     fields: dict[str, Any] = Field(default_factory=dict)
-
