@@ -290,6 +290,12 @@ Guia completo para o worker: `docs/worker-integration.md`.
 
 Exemplos de cliente: `examples/worker/pmo_agent_client.py` e `examples/worker/process_message.py`.
 
+## GitHub Actions e deploy automatico
+
+O fluxo recomendado e abrir Pull Request contra `main`. O workflow `CI` valida testes no PR. Depois do merge em `main`, o workflow `Deploy VPS` atualiza automaticamente a VPS em `/opt/pmo-ai-agent-api`, preservando `.env` e bancos locais.
+
+Detalhes: `docs/github-vps-automation.md`.
+
 ## Integracao legada com o worker
 
 Configure no worker:
