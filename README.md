@@ -207,7 +207,90 @@ curl -X POST http://localhost:8010/agent/confirm \
 
 Com `confirmed=false`, a acao pendente e cancelada e nada e alterado no board.
 
-## Integracao futura com o worker
+## API v1 recomendada para o worker
+
+A arquitetura v1 adiciona:
+
+- orquestrador LangGraph principal;
+- subgrafos de tarefas e projetos;
+- roteamento hibrido deterministico + LLM;
+- registry central com as nove tools MCP permitidas;
+- `MCPGateway` com validacao de schema, allowlist, autorizacao, retry de leitura, idempotencia de escrita e auditoria;
+- confirmacao humana antes de escrita;
+- retomada por `thread_id` usando pending actions persistidas;
+- logs JSON com IDs de correlacao;
+- `/ready` para readiness.
+
+Endpoints:
+
+```text
+POST /v1/agent/messages
+POST /v1/agent/confirmations
+GET  /health
+GET  /ready
+```
+
+Exemplo de mensagem:
+
+```bash
+curl -X POST http://localhost:8010/v1/agent/messages \
+  -H "Content-Type: application/json" \
+  -H "X-Request-ID: test-request-001" \
+  -H "X-Correlation-ID: test-correlation-001" \
+  -H "X-Tenant-ID: porto" \
+  -H "X-User-ID: user-123" \
+  -H "X-User-Roles: board.read,board.manage" \
+  -d '{
+    "thread_id": "porto:telegram:123456",
+    "message": "Mova a tarefa TASK-123 para concluido",
+    "channel": "telegram",
+    "metadata": {"message_id": "987654"}
+  }'
+```
+
+Resposta de escrita aguardando confirmacao:
+
+```json
+{
+  "request_id": "test-request-001",
+  "thread_id": "porto:telegram:123456",
+  "status": "awaiting_confirmation",
+  "intent": "task.move",
+  "message": "Vou mover a tarefa TASK-123 para DONE. Confirma?",
+  "data": {},
+  "confirmation": {
+    "confirmation_id": "uuid",
+    "action": "board_move_task",
+    "preview": {}
+  }
+}
+```
+
+Confirmacao:
+
+```bash
+curl -X POST http://localhost:8010/v1/agent/confirmations \
+  -H "Content-Type: application/json" \
+  -H "X-Request-ID: test-request-002" \
+  -H "X-Correlation-ID: test-correlation-001" \
+  -H "X-Tenant-ID: porto" \
+  -H "X-User-ID: user-123" \
+  -H "X-User-Roles: board.read,board.manage" \
+  -d '{
+    "thread_id": "porto:telegram:123456",
+    "confirmation_id": "UUID_RETORNADO",
+    "approved": true,
+    "message": "confirmo"
+  }'
+```
+
+Detalhes da arquitetura: `docs/architecture-v1.md`.
+
+Guia completo para o worker: `docs/worker-integration.md`.
+
+Exemplos de cliente: `examples/worker/pmo_agent_client.py` e `examples/worker/process_message.py`.
+
+## Integracao legada com o worker
 
 Configure no worker:
 
@@ -216,6 +299,8 @@ PMO_AGENT_API_URL=http://pmo-ai-agent-api:8010
 ```
 
 Depois do debounce/fila/worker tratar a mensagem, envie o payload para `POST /agent/invoke`. Se a resposta pedir confirmacao, o worker deve armazenar ou repassar o `pending_action_id` e chamar `POST /agent/confirm` quando o usuario confirmar.
+
+Para novas integracoes, prefira `/v1/agent/messages` e `/v1/agent/confirmations`.
 
 ## Langfuse
 

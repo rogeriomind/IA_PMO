@@ -43,6 +43,20 @@ class Settings(BaseSettings):
     mcp_timeout_seconds: float = Field(default=15.0, alias="MCP_TIMEOUT_SECONDS")
     mcp_read_retries: int = Field(default=2, alias="MCP_READ_RETRIES")
 
+    agent_intent_confidence_threshold: float = Field(
+        default=0.75, alias="AGENT_INTENT_CONFIDENCE_THRESHOLD"
+    )
+    agent_api_token: SecretStr | None = Field(default=None, alias="AGENT_API_TOKEN")
+    agent_default_tenant_id: str = Field(default="default", alias="AGENT_DEFAULT_TENANT_ID")
+    agent_default_user_id: str = Field(default="system", alias="AGENT_DEFAULT_USER_ID")
+    agent_default_user_roles: str = Field(
+        default="board.read,board.write,board.manage",
+        alias="AGENT_DEFAULT_USER_ROLES",
+    )
+    agent_max_message_chars: int = Field(default=4000, alias="AGENT_MAX_MESSAGE_CHARS")
+    agent_tool_result_max_chars: int = Field(default=12000, alias="AGENT_TOOL_RESULT_MAX_CHARS")
+    agent_thread_lock_ttl_seconds: int = Field(default=60, alias="AGENT_THREAD_LOCK_TTL_SECONDS")
+
     langfuse_enabled: bool = Field(default=True, alias="LANGFUSE_ENABLED")
     langfuse_public_key: SecretStr | None = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: SecretStr | None = Field(default=None, alias="LANGFUSE_SECRET_KEY")
@@ -120,6 +134,14 @@ class Settings(BaseSettings):
             and self.langfuse_secret_key
             and self.langfuse_host.strip()
         )
+
+    @property
+    def default_user_roles(self) -> list[str]:
+        return [
+            role.strip()
+            for role in self.agent_default_user_roles.split(",")
+            if role.strip()
+        ]
 
 
 @lru_cache

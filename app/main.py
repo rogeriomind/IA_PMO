@@ -6,6 +6,20 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from app.agent.domains.projects.graph import build_project_subgraph
+from app.agent.domains.projects.nodes import ProjectNodes
+from app.agent.domains.tasks.graph import build_task_query_subgraph, build_task_write_subgraph
+from app.agent.domains.tasks.nodes import TaskQueryNodes, TaskWriteNodes
+from app.agent.graph.builder import build_main_agent_graph
+from app.agent.graph.nodes import MainGraphNodes
+from app.agent.mcp_gateway import BoardToolsExecutor, MCPGateway
+from app.agent.observability import ObservabilityService
+from app.agent.routing import HybridIntentRouter
+from app.agent.service import AgentWorkflowService
+from app.agent.thread_lock import ThreadLockManager
+from app.agent.tool_registry import ToolRegistry
+from app.api.middleware import install_correlation_middleware
+from app.api.routes.agent_v1 import router as agent_v1_router
 from app.config import Settings, get_settings
 from app.graph.builder import build_confirmation_graph, build_invoke_graph
 from app.graph.nodes import AgentGraphNodes
@@ -30,6 +44,7 @@ from app.services.intent_service import IntentService
 from app.services.pending_action_service import PendingActionService
 from app.services.response_service import ResponseService
 from app.storage.repository import PendingActionRepository
+from app.structured_logging import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +83,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app_settings = settings_override or get_settings()
-        logging.basicConfig(
-            level=getattr(logging, app_settings.log_level.upper(), logging.INFO),
-            format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        )
+        configure_logging(app_settings.log_level)
 
         repository = repository_override or PendingActionRepository(app_settings)
         repository.init_db()
@@ -101,6 +113,44 @@ def create_app(
         app.state.invoke_graph = build_invoke_graph(nodes)
         app.state.confirm_graph = build_confirmation_graph(nodes)
 
+        tool_registry = ToolRegistry(
+            read_timeout_seconds=app_settings.mcp_timeout_seconds,
+            write_timeout_seconds=app_settings.mcp_timeout_seconds,
+            read_retries=app_settings.mcp_read_retries,
+        )
+        gateway = MCPGateway(
+            registry=tool_registry,
+            executor=BoardToolsExecutor(board_tools),
+            repository=repository,
+            result_max_chars=app_settings.agent_tool_result_max_chars,
+        )
+        v1_router = HybridIntentRouter(app_settings)
+        observability = ObservabilityService(tracer)
+        task_query_subgraph = build_task_query_subgraph(TaskQueryNodes(gateway))
+        task_write_subgraph = build_task_write_subgraph(TaskWriteNodes(gateway, repository))
+        project_subgraph = build_project_subgraph(ProjectNodes(gateway))
+        main_graph_nodes = MainGraphNodes(
+            settings=app_settings,
+            router=v1_router,
+            repository=repository,
+        )
+        v1_graph = build_main_agent_graph(
+            nodes=main_graph_nodes,
+            task_query_subgraph=task_query_subgraph,
+            task_write_subgraph=task_write_subgraph,
+            project_subgraph=project_subgraph,
+        )
+        app.state.tool_registry = tool_registry
+        app.state.mcp_gateway = gateway
+        app.state.v1_agent_graph = v1_graph
+        app.state.v1_agent_service = AgentWorkflowService(
+            graph=v1_graph,
+            gateway=gateway,
+            repository=repository,
+            observability=observability,
+            thread_locks=ThreadLockManager(app_settings.agent_thread_lock_ttl_seconds),
+        )
+
         if not app_settings.llm_configured:
             logger.warning(
                 "LLM is not fully configured. Set AI_PROVIDER plus provider API key and model."
@@ -121,6 +171,8 @@ def create_app(
             tracer.flush()
 
     api = FastAPI(title="PMO AI Agent API", version="0.1.0", lifespan=lifespan)
+    install_correlation_middleware(api)
+    api.include_router(agent_v1_router)
 
     @api.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -137,6 +189,27 @@ def create_app(
 
         return HealthResponse(
             status="ok",
+            service=app_settings.service_name,
+            model=app_settings.llm_model or "not_configured",
+            langfuse_enabled=api.state.tracer.enabled,
+            mcp_loaded=mcp_client.mcp_loaded,
+            checks=checks,
+        )
+
+    @api.get("/ready", response_model=HealthResponse)
+    async def ready() -> HealthResponse:
+        app_settings: Settings = api.state.settings
+        mcp_client: MCPBoardClient = api.state.mcp_client
+        tool_registry: ToolRegistry = api.state.tool_registry
+        checks: dict[str, Any] = {
+            "llm_provider": app_settings.llm_provider,
+            "llm_configured": app_settings.llm_configured,
+            "mcp_loaded": mcp_client.mcp_loaded,
+            "registry_tools": sorted(tool_registry.names()),
+            "database": "configured",
+        }
+        return HealthResponse(
+            status="ok" if tool_registry.names() else "degraded",
             service=app_settings.service_name,
             model=app_settings.llm_model or "not_configured",
             langfuse_enabled=api.state.tracer.enabled,
