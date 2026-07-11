@@ -4,28 +4,46 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 
 from app.agent.domains.projects.graph import build_project_subgraph
 from app.agent.domains.projects.nodes import ProjectNodes
 from app.agent.domains.tasks.graph import build_task_query_subgraph, build_task_write_subgraph
 from app.agent.domains.tasks.nodes import TaskQueryNodes, TaskWriteNodes
+from app.agent.extraction.extractor import TaskExtractionService
 from app.agent.graph.builder import build_main_agent_graph
 from app.agent.graph.nodes import MainGraphNodes
+from app.agent.main_graph.builder import build_pmo_agent_graph
+from app.agent.main_graph.nodes import PMOMainGraphNodes
 from app.agent.mcp_gateway import BoardToolsExecutor, MCPGateway
 from app.agent.observability import ObservabilityService
 from app.agent.routing import HybridIntentRouter
 from app.agent.service import AgentWorkflowService
+from app.agent.subgraphs.confirmation.nodes import ConfirmationSubgraph
+from app.agent.subgraphs.questions.nodes import QuestionsSubgraph
+from app.agent.subgraphs.status.nodes import StatusSubgraph
+from app.agent.subgraphs.task_create.nodes import CreateTaskSubgraph
+from app.agent.subgraphs.task_update.nodes import UpdateTaskSubgraph
+from app.agent.subgraphs.welcome.nodes import WelcomeMenuSubgraph
 from app.agent.thread_lock import ThreadLockManager
 from app.agent.tool_registry import ToolRegistry
+from app.application.agent_service import AgentV2Service
+from app.application.assignee_resolver import AssigneeResolver
+from app.application.confirmation_service import AgentConfirmationService as AgentV2ConfirmationService
+from app.application.draft_service import DraftService
+from app.application.memory_service import MemoryService
+from app.application.task_selection_service import TaskSelectionService
 from app.api.middleware import install_correlation_middleware
 from app.api.routes.agent_v1 import router as agent_v1_router
+from app.api.routes.agent_v2 import router as agent_v2_router
 from app.config import Settings, get_settings
 from app.graph.builder import build_confirmation_graph, build_invoke_graph
 from app.graph.nodes import AgentGraphNodes
 from app.mcp.board_tools import BoardTools
 from app.mcp.board_tools import normalize_priority, normalize_status
 from app.mcp.client import MCPBoardClient
+from app.infrastructure.observability.metrics import AgentMetrics
+from app.infrastructure.redis.locks import RedisThreadLockManager
 from app.observability.langfuse import LangfuseTracer
 from app.schemas import (
     AgentAction,
@@ -79,11 +97,13 @@ def create_app(
     repository_override: PendingActionRepository | None = None,
 ) -> FastAPI:
     settings_override = settings
+    route_settings = settings_override or get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app_settings = settings_override or get_settings()
+        app_settings = settings_override or route_settings
         configure_logging(app_settings.log_level)
+        app_settings.validate_runtime_requirements()
 
         repository = repository_override or PendingActionRepository(app_settings)
         repository.init_db()
@@ -150,6 +170,67 @@ def create_app(
             observability=observability,
             thread_locks=ThreadLockManager(app_settings.agent_thread_lock_ttl_seconds),
         )
+        memory_service = MemoryService(repository, app_settings)
+        selection_service = TaskSelectionService(repository, app_settings)
+        draft_service = DraftService(repository, app_settings)
+        extraction_service = TaskExtractionService(app_settings)
+        assignee_resolver = AssigneeResolver()
+        v2_confirmation_service = AgentV2ConfirmationService(repository, gateway)
+        welcome_subgraph = WelcomeMenuSubgraph()
+        status_subgraph = StatusSubgraph(
+            gateway=gateway,
+            selections=selection_service,
+            settings=app_settings,
+        )
+        create_subgraph = CreateTaskSubgraph(
+            extractor=extraction_service,
+            drafts=draft_service,
+            assignees=assignee_resolver,
+            repository=repository,
+            settings=app_settings,
+        )
+        update_subgraph = UpdateTaskSubgraph(
+            gateway=gateway,
+            extractor=extraction_service,
+            selections=selection_service,
+            drafts=draft_service,
+            assignees=assignee_resolver,
+            repository=repository,
+            settings=app_settings,
+        )
+        confirmation_subgraph = ConfirmationSubgraph(
+            confirmations=v2_confirmation_service,
+            drafts=draft_service,
+            repository=repository,
+        )
+        v2_nodes = PMOMainGraphNodes(
+            settings=app_settings,
+            memory=memory_service,
+            welcome=welcome_subgraph,
+            status=status_subgraph,
+            create_task=create_subgraph,
+            update_task=update_subgraph,
+            questions=QuestionsSubgraph(),
+            confirmation=confirmation_subgraph,
+        )
+        v2_graph = build_pmo_agent_graph(v2_nodes)
+        v2_locks = (
+            RedisThreadLockManager(
+                redis_url=app_settings.redis_url,
+                ttl_seconds=app_settings.agent_thread_lock_ttl_seconds,
+            )
+            if app_settings.redis_enabled
+            else ThreadLockManager(app_settings.agent_thread_lock_ttl_seconds)
+        )
+        app.state.agent_metrics = AgentMetrics()
+        app.state.v2_agent_graph = v2_graph
+        app.state.v2_agent_service = AgentV2Service(
+            graph=v2_graph,
+            repository=repository,
+            settings=app_settings,
+            thread_locks=v2_locks,
+            tracer=tracer,
+        )
 
         if not app_settings.llm_configured:
             logger.warning(
@@ -170,9 +251,12 @@ def create_app(
         finally:
             tracer.flush()
 
-    api = FastAPI(title="PMO AI Agent API", version="0.1.0", lifespan=lifespan)
+    api = FastAPI(title="PMO AI Agent API", version="0.2.0", lifespan=lifespan)
     install_correlation_middleware(api)
-    api.include_router(agent_v1_router)
+    if route_settings.v1_endpoints_enabled:
+        api.include_router(agent_v1_router)
+    if route_settings.v2_endpoints_enabled:
+        api.include_router(agent_v2_router)
 
     @api.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -219,6 +303,8 @@ def create_app(
 
     @api.post("/agent/invoke", response_model=AgentInvokeResponse)
     async def agent_invoke(payload: AgentInvokeRequest) -> AgentInvokeResponse:
+        if not route_settings.effective_legacy_endpoints_enabled:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Legacy endpoint disabled")
         tracer: LangfuseTracer = api.state.tracer
         trace = tracer.start_trace(
             name="agent.invoke",
@@ -266,6 +352,8 @@ def create_app(
     @api.post("/agent/process", response_model=ExternalAgentProcessResponse)
     async def agent_process(payload: ExternalAgentProcessRequest) -> ExternalAgentProcessResponse:
         """Compatibility endpoint for the existing PMO Agent ExternalAgentService contract."""
+        if not route_settings.effective_legacy_endpoints_enabled:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Legacy endpoint disabled")
         tracer: LangfuseTracer = api.state.tracer
         trace = tracer.start_trace(
             name="agent.process",
@@ -323,6 +411,8 @@ def create_app(
 
     @api.post("/agent/confirm", response_model=AgentConfirmResponse)
     async def agent_confirm(payload: AgentConfirmRequest) -> AgentConfirmResponse:
+        if not route_settings.effective_legacy_endpoints_enabled:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Legacy endpoint disabled")
         tracer: LangfuseTracer = api.state.tracer
         trace = tracer.start_trace(
             name="agent.confirm",

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     )
 
     service_name: str = "pmo-ai-agent-api"
+    app_env: Literal["development", "staging", "production"] | str = Field(
+        default="development", alias="APP_ENV"
+    )
 
     ai_provider: Literal["deepseek", "openai"] | str = Field(default="deepseek", alias="AI_PROVIDER")
 
@@ -31,6 +34,9 @@ class Settings(BaseSettings):
     )
 
     database_url: str = Field(default="", alias="DATABASE_URL")
+
+    redis_enabled: bool = Field(default=False, alias="REDIS_ENABLED")
+    redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
 
     mcp_board_url: str = Field(default="", alias="MCP_BOARD_URL")
     mcp_board_transport: Literal["http", "streamable_http", "sse", "stdio"] | str = Field(
@@ -50,12 +56,22 @@ class Settings(BaseSettings):
     agent_default_tenant_id: str = Field(default="default", alias="AGENT_DEFAULT_TENANT_ID")
     agent_default_user_id: str = Field(default="system", alias="AGENT_DEFAULT_USER_ID")
     agent_default_user_roles: str = Field(
-        default="board.read,board.write,board.manage",
+        default="",
         alias="AGENT_DEFAULT_USER_ROLES",
     )
     agent_max_message_chars: int = Field(default=4000, alias="AGENT_MAX_MESSAGE_CHARS")
     agent_tool_result_max_chars: int = Field(default=12000, alias="AGENT_TOOL_RESULT_MAX_CHARS")
     agent_thread_lock_ttl_seconds: int = Field(default=60, alias="AGENT_THREAD_LOCK_TTL_SECONDS")
+    agent_memory_retention_days: int = Field(default=90, alias="AGENT_MEMORY_RETENTION_DAYS")
+    agent_session_ttl_minutes: int = Field(default=1440, alias="AGENT_SESSION_TTL_MINUTES")
+    agent_pending_action_ttl_minutes: int = Field(default=15, alias="AGENT_PENDING_ACTION_TTL_MINUTES")
+    agent_task_selection_ttl_minutes: int = Field(default=30, alias="AGENT_TASK_SELECTION_TTL_MINUTES")
+    agent_max_ui_options: int = Field(default=12, alias="AGENT_MAX_UI_OPTIONS")
+    agent_update_page_size: int = Field(default=8, alias="AGENT_UPDATE_PAGE_SIZE")
+
+    legacy_endpoints_enabled: bool | None = Field(default=None, alias="LEGACY_ENDPOINTS_ENABLED")
+    v1_endpoints_enabled: bool = Field(default=True, alias="V1_ENDPOINTS_ENABLED")
+    v2_endpoints_enabled: bool = Field(default=True, alias="V2_ENDPOINTS_ENABLED")
 
     langfuse_enabled: bool = Field(default=True, alias="LANGFUSE_ENABLED")
     langfuse_public_key: SecretStr | None = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
@@ -71,6 +87,14 @@ class Settings(BaseSettings):
         normalized = (value or "deepseek").strip().lower()
         if normalized not in {"deepseek", "openai"}:
             return "deepseek"
+        return normalized
+
+    @field_validator("app_env")
+    @classmethod
+    def normalize_app_env(cls, value: str) -> str:
+        normalized = (value or "development").strip().lower()
+        if normalized not in {"development", "staging", "production"}:
+            return "development"
         return normalized
 
     @field_validator("mcp_board_transport")
@@ -95,6 +119,35 @@ class Settings(BaseSettings):
         if raw.startswith("postgresql://"):
             return "postgresql+psycopg://" + raw.removeprefix("postgresql://")
         return raw
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
+
+    @property
+    def database_is_postgres(self) -> bool:
+        return self.resolved_database_url.startswith("postgresql+psycopg://")
+
+    @property
+    def effective_legacy_endpoints_enabled(self) -> bool:
+        if self.legacy_endpoints_enabled is None:
+            return not self.is_production
+        return self.legacy_endpoints_enabled
+
+    def validate_runtime_requirements(self) -> None:
+        if self.is_production:
+            if not self.agent_api_token:
+                raise RuntimeError("AGENT_API_TOKEN is required in production")
+            if not self.database_url.strip() or not self.database_is_postgres:
+                raise RuntimeError("DATABASE_URL must point to PostgreSQL in production")
+            if not self.redis_enabled:
+                # A single replica can run without Redis, but production defaults should make
+                # the risk explicit at startup.
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "REDIS_ENABLED=false in production; run a single API replica or enable Redis locks."
+                )
 
     @property
     def openai_configured(self) -> bool:
