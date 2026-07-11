@@ -107,7 +107,7 @@ jobs:
             -i ~/.ssh/vps_deploy_key \
             -p "${VPS_PORT:-22}" \
             "${VPS_USER}@${VPS_HOST}" \
-            "APP_DIR='$app_dir' AGENT_PORT='$agent_port' GITHUB_SHA='$GITHUB_SHA' bash -s" <<'REMOTE'
+            "APP_DIR='$app_dir' AGENT_PORT='$agent_port' GITHUB_SHA='$GITHUB_SHA' LANGFUSE_PUBLIC_URL='http://${VPS_HOST}:3000' bash -s" <<'REMOTE'
           set -euo pipefail
 
           archive="/tmp/pmo-ai-agent-api-${GITHUB_SHA}.tar.gz"
@@ -139,6 +139,50 @@ jobs:
             "$release_dir/" "$APP_DIR/"
 
           cd "$APP_DIR"
+          touch .env
+
+          ensure_env_var() {
+            name="$1"
+            value="$2"
+            if ! grep -q "^${name}=" .env; then
+              printf '\n%s=%s\n' "$name" "$value" >> .env
+            fi
+          }
+
+          random_base64() {
+            openssl rand -base64 32 | tr -d '\n'
+          }
+
+          random_hex() {
+            openssl rand -hex 32 | tr -d '\n'
+          }
+
+          random_token() {
+            openssl rand -hex 16 | tr -d '\n'
+          }
+
+          ensure_env_var LANGFUSE_ENABLED true
+          ensure_env_var LANGFUSE_HOST http://langfuse-web:3000
+          ensure_env_var LANGFUSE_WEB_PORT 3000
+          ensure_env_var LANGFUSE_NEXTAUTH_URL "${LANGFUSE_PUBLIC_URL:-http://localhost:3000}"
+          ensure_env_var LANGFUSE_NEXTAUTH_SECRET "$(random_base64)"
+          ensure_env_var LANGFUSE_SALT "$(random_base64)"
+          ensure_env_var LANGFUSE_ENCRYPTION_KEY "$(random_hex)"
+          ensure_env_var LANGFUSE_POSTGRES_PASSWORD "$(random_base64)"
+          ensure_env_var LANGFUSE_CLICKHOUSE_PASSWORD "$(random_base64)"
+          ensure_env_var LANGFUSE_REDIS_AUTH "$(random_base64)"
+          ensure_env_var LANGFUSE_MINIO_ROOT_USER "langfuse$(random_token)"
+          ensure_env_var LANGFUSE_MINIO_ROOT_PASSWORD "$(random_base64)"
+          ensure_env_var LANGFUSE_INIT_ORG_ID pmo-agent
+          ensure_env_var LANGFUSE_INIT_ORG_NAME PMO-Agent
+          ensure_env_var LANGFUSE_INIT_PROJECT_ID pmo-agent-api
+          ensure_env_var LANGFUSE_INIT_PROJECT_NAME PMO-Agent-API
+          ensure_env_var LANGFUSE_INIT_PROJECT_PUBLIC_KEY "lf_pk_$(random_token)"
+          ensure_env_var LANGFUSE_INIT_PROJECT_SECRET_KEY "lf_sk_$(random_token)"
+          ensure_env_var LANGFUSE_INIT_USER_EMAIL admin@pmo-agent.local
+          ensure_env_var LANGFUSE_INIT_USER_NAME PMO-Admin
+          ensure_env_var LANGFUSE_INIT_USER_PASSWORD "$(random_base64)"
+
           docker compose build
           docker compose up -d
 
@@ -151,7 +195,7 @@ jobs:
           done
 
           curl -fsS "http://localhost:${AGENT_PORT}/ready"
+          curl -fsS "http://localhost:${LANGFUSE_WEB_PORT:-3000}/api/public/health" || true
           docker compose ps
           rm -rf "$release_dir" "$archive"
           REMOTE
-

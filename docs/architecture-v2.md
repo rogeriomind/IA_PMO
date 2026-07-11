@@ -79,3 +79,22 @@ Langfuse recebe payloads sanitizados. O modulo `app/infrastructure/observability
 - `agent_pending_actions_total`
 - `agent_idempotency_hits_total`
 - `agent_errors_total`
+
+## Langfuse Self-Hosted
+
+O `docker-compose.yml` inclui Langfuse v3 self-hosted com web, worker, PostgreSQL, ClickHouse, Redis e MinIO. O workflow `Deploy VPS` gera automaticamente as variaveis secretas ausentes no `.env` da VPS e configura a API para enviar traces para `http://langfuse-web:3000`.
+
+Na VPS, a UI fica exposta por padrao em:
+
+```text
+http://<VPS_HOST>:3000
+```
+
+As credenciais iniciais e chaves do projeto ficam no `.env` preservado da VPS:
+
+```text
+LANGFUSE_INIT_USER_EMAIL
+LANGFUSE_INIT_USER_PASSWORD
+LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+LANGFUSE_INIT_PROJECT_SECRET_KEY
+```
