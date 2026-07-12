@@ -321,6 +321,7 @@ class UpdateTaskSubgraph:
         extraction = await self.extractor.extract_update(
             text,
             timezone=(state.get("metadata") or {}).get("timezone") or "America/Sao_Paulo",
+            trace=state.get("_trace"),
         )
         fields = dict(extraction.fields or {})
         comment = extraction.comment

@@ -43,3 +43,5 @@ class AgentState(TypedDict, total=False):
     retry_count: int
     errors: list[dict[str, Any]]
 
+    trace_id: str | None
+    _trace: Any

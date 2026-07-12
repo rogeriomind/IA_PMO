@@ -45,7 +45,7 @@ class AgentWorkflowService:
         )
         async with self.thread_locks.acquire(tenant_id=state["tenant_id"], thread_id=state["thread_id"]):
             try:
-                result = await self.graph.ainvoke(state)
+                result = await self.graph.ainvoke({**state, "trace_id": trace.trace_id, "_trace": trace})
             except Exception as exc:
                 result = self._error_result(state, exc)
             await self.observability.update_trace(trace, output=result)
@@ -306,4 +306,3 @@ def _success_message(tool_name: str, read_after_write: Any | None) -> str:
     if isinstance(read_after_write, dict) and read_after_write.get("partial"):
         return base + " Nao consegui confirmar a leitura final automaticamente."
     return base
-

@@ -68,7 +68,10 @@ class MainGraphNodes:
     async def classify_and_extract(self, state: AgentState) -> AgentState:
         if state.get("route") == "classified":
             return {}
-        classification = await self.router.classify(state.get("normalized_message", ""))
+        classification = await self.router.classify(
+            state.get("normalized_message", ""),
+            trace=state.get("_trace"),
+        )
         return {
             "intent": classification.intent,
             "confidence": classification.confidence,
@@ -162,4 +165,3 @@ def safe_error_state(exc: Exception, state: AgentState) -> AgentState:
     errors = list(state.get("errors") or [])
     errors.append({"code": code, "message": str(exc)})
     return {"errors": errors, "status": "error", "final_answer": message}
-

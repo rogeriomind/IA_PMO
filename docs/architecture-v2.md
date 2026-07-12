@@ -68,7 +68,7 @@ flowchart LR
 
 ## Observabilidade
 
-Langfuse recebe payloads sanitizados. O modulo `app/infrastructure/observability/metrics.py` declara os nomes preparados para Prometheus:
+Langfuse recebe payloads sanitizados em traces raiz por evento do agente, spans por etapa do fluxo e generations para chamadas LLM de classificacao e extracao estruturada. O modulo `app/infrastructure/observability/metrics.py` declara os nomes preparados para Prometheus:
 
 - `agent_events_total`
 - `agent_event_duration_seconds`
@@ -82,7 +82,7 @@ Langfuse recebe payloads sanitizados. O modulo `app/infrastructure/observability
 
 ## Langfuse Self-Hosted
 
-O `docker-compose.yml` inclui Langfuse v3 self-hosted com web, worker, PostgreSQL, ClickHouse, Redis e MinIO. O workflow `Deploy VPS` gera automaticamente as variaveis secretas ausentes no `.env` da VPS e configura a API para enviar traces para `http://langfuse-web:3000`.
+O `docker-compose.yml` inclui Langfuse v3 self-hosted com web, worker, PostgreSQL, ClickHouse, Redis e MinIO. O workflow `Deploy VPS` gera automaticamente as variaveis secretas ausentes no `.env` da VPS e configura a API para enviar traces para `http://langfuse-web:3000`. A API aceita `LANGFUSE_HOST` ou o nome oficial `LANGFUSE_BASE_URL`.
 As senhas geradas pelo workflow usam hexadecimal para evitar caracteres especiais que quebram a URL de migracao do ClickHouse no Langfuse.
 
 Na VPS, a UI fica exposta por padrao em:

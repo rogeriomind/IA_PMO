@@ -310,12 +310,15 @@ Para novas integracoes, prefira `/v1/agent/messages` e `/v1/agent/confirmations`
 
 ## Langfuse
 
-Quando `LANGFUSE_ENABLED=true` e as chaves estiverem configuradas, cada `/agent/invoke` e `/agent/confirm` cria um trace com:
+Quando `LANGFUSE_ENABLED=true` e as chaves estiverem configuradas, cada chamada do agente cria um trace no Langfuse. Configure `LANGFUSE_HOST` ou `LANGFUSE_BASE_URL` junto com `LANGFUSE_PUBLIC_KEY` e `LANGFUSE_SECRET_KEY`.
+
+Os traces incluem:
 
 - `session_id`: `conversation_id`
 - `user_id`: `user_id`
 - metadata: `intent`, `confidence`, `channel`, `project_id`
 - spans por node do LangGraph e chamada MCP quando possivel
+- generations das chamadas LLM de classificacao de intencao e extracao estruturada
 
 Payloads sao sanitizados para mascarar tokens, Authorization, cookies, senhas e secrets.
 

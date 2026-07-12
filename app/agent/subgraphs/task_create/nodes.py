@@ -57,6 +57,7 @@ class CreateTaskSubgraph:
             extraction = await self.extractor.extract_create(
                 text,
                 timezone=(state.get("metadata") or {}).get("timezone") or "America/Sao_Paulo",
+                trace=state.get("_trace"),
             )
             draft = _merge_draft(draft, extraction.model_dump(exclude_none=True))
 

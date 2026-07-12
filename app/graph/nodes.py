@@ -46,7 +46,7 @@ class AgentGraphNodes:
     async def classify_intent(self, state: AgentState) -> AgentState:
         trace = state.get("_trace")
         with self.tracer.span(trace, "classify_intent", input_payload={"message": state.get("message")}):
-            result = await self.intent_service.classify(state["message"])
+            result = await self.intent_service.classify(state["message"], trace=trace)
             self.tracer.update_trace(
                 trace,
                 metadata={
@@ -97,7 +97,7 @@ class AgentGraphNodes:
         trace = state.get("_trace")
         intent = state.get("intent", Intent.UNKNOWN)
         with self.tracer.span(trace, "extract_entities", metadata={"intent": intent.value}):
-            entities = await self.intent_service.extract_entities(state["message"], intent)
+            entities = await self.intent_service.extract_entities(state["message"], intent, trace=trace)
             return {"entities": entities.model_dump(exclude_none=True)}
 
     async def validate_required_fields(self, state: AgentState) -> AgentState:
@@ -251,4 +251,3 @@ class AgentGraphNodes:
                 }
             )
         return {}
-

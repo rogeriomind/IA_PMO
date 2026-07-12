@@ -8,14 +8,16 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.graph.prompts import CLASSIFIER_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT
+from app.observability.langfuse import LangfuseTracer, TraceContext
 from app.schemas import Intent, IntentClassification, TaskEntities
 
 logger = logging.getLogger(__name__)
 
 
 class IntentService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, tracer: LangfuseTracer | None = None):
         self.settings = settings
+        self.tracer = tracer
         self._classifier = None
         self._extractor = None
 
@@ -36,16 +38,23 @@ class IntentService:
         else:
             logger.warning("LLM provider, API key or model is not configured; local fallback will be used")
 
-    async def classify(self, message: str) -> IntentClassification:
+    async def classify(self, message: str, trace: TraceContext | None = None) -> IntentClassification:
         if self._classifier:
             try:
-                result = await self._classifier.ainvoke(
-                    [
-                        ("system", CLASSIFIER_SYSTEM_PROMPT),
-                        ("human", message),
-                    ]
+                messages = [
+                    ("system", CLASSIFIER_SYSTEM_PROMPT),
+                    ("human", message),
+                ]
+                generation = self._generation(
+                    trace,
+                    "legacy.intent.classify",
+                    input_payload=messages,
+                    metadata={"provider": self.settings.llm_provider, "schema": "IntentClassification"},
                 )
-                classification = IntentClassification.model_validate(result)
+                with generation as observation:
+                    result = await self._classifier.ainvoke(messages)
+                    classification = IntentClassification.model_validate(result)
+                    self._update_observation(observation, output=classification.model_dump(mode="json"))
                 local = self._classify_locally(message)
                 if classification.intent == Intent.UNKNOWN and local.intent != Intent.UNKNOWN:
                     return local
@@ -54,16 +63,27 @@ class IntentService:
                 logger.exception("Intent classification via %s failed; using local fallback", self.settings.llm_provider)
         return self._classify_locally(message)
 
-    async def extract_entities(self, message: str, intent: Intent) -> TaskEntities:
+    async def extract_entities(self, message: str, intent: Intent, trace: TraceContext | None = None) -> TaskEntities:
         if self._extractor:
             try:
-                result = await self._extractor.ainvoke(
-                    [
-                        ("system", EXTRACTOR_SYSTEM_PROMPT),
-                        ("human", f"Intent: {intent.value}\nMensagem: {message}"),
-                    ]
+                messages = [
+                    ("system", EXTRACTOR_SYSTEM_PROMPT),
+                    ("human", f"Intent: {intent.value}\nMensagem: {message}"),
+                ]
+                generation = self._generation(
+                    trace,
+                    "legacy.entities.extract",
+                    input_payload=messages,
+                    metadata={
+                        "provider": self.settings.llm_provider,
+                        "schema": "TaskEntities",
+                        "intent": intent.value,
+                    },
                 )
-                entities = TaskEntities.model_validate(result)
+                with generation as observation:
+                    result = await self._extractor.ainvoke(messages)
+                    entities = TaskEntities.model_validate(result)
+                    self._update_observation(observation, output=entities.model_dump(mode="json"))
                 local_entities = self._extract_locally(message, intent)
                 return self._merge_entities(entities, local_entities)
             except Exception:
@@ -107,6 +127,31 @@ class IntentService:
                 "available": False,
                 "error": str(exc),
             }
+
+    def _generation(
+        self,
+        trace: TraceContext | None,
+        name: str,
+        *,
+        input_payload: Any,
+        metadata: dict[str, Any],
+    ):
+        if self.tracer:
+            return self.tracer.generation(
+                trace,
+                name,
+                input_payload=input_payload,
+                metadata=metadata,
+                model=self.settings.llm_model,
+                model_parameters={"timeout": 30},
+            )
+        from contextlib import nullcontext
+
+        return nullcontext(None)
+
+    def _update_observation(self, observation: Any | None, *, output: Any) -> None:
+        if self.tracer and observation:
+            self.tracer.update_observation(observation, output=output)
 
     def _classify_locally(self, message: str) -> IntentClassification:
         text = message.casefold().strip()
