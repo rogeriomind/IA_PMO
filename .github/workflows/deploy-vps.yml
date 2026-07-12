@@ -149,10 +149,6 @@ jobs:
             fi
           }
 
-          random_base64() {
-            openssl rand -base64 32 | tr -d '\n'
-          }
-
           random_hex() {
             openssl rand -hex 32 | tr -d '\n'
           }
@@ -165,14 +161,14 @@ jobs:
           ensure_env_var LANGFUSE_HOST http://langfuse-web:3000
           ensure_env_var LANGFUSE_WEB_PORT 3000
           ensure_env_var LANGFUSE_NEXTAUTH_URL "${LANGFUSE_PUBLIC_URL:-http://localhost:3000}"
-          ensure_env_var LANGFUSE_NEXTAUTH_SECRET "$(random_base64)"
-          ensure_env_var LANGFUSE_SALT "$(random_base64)"
+          ensure_env_var LANGFUSE_NEXTAUTH_SECRET "$(random_hex)"
+          ensure_env_var LANGFUSE_SALT "$(random_hex)"
           ensure_env_var LANGFUSE_ENCRYPTION_KEY "$(random_hex)"
-          ensure_env_var LANGFUSE_POSTGRES_PASSWORD "$(random_base64)"
-          ensure_env_var LANGFUSE_CLICKHOUSE_PASSWORD "$(random_base64)"
-          ensure_env_var LANGFUSE_REDIS_AUTH "$(random_base64)"
+          ensure_env_var LANGFUSE_POSTGRES_PASSWORD "$(random_hex)"
+          ensure_env_var LANGFUSE_CLICKHOUSE_PASSWORD "$(random_hex)"
+          ensure_env_var LANGFUSE_REDIS_AUTH "$(random_hex)"
           ensure_env_var LANGFUSE_MINIO_ROOT_USER "langfuse$(random_token)"
-          ensure_env_var LANGFUSE_MINIO_ROOT_PASSWORD "$(random_base64)"
+          ensure_env_var LANGFUSE_MINIO_ROOT_PASSWORD "$(random_hex)"
           ensure_env_var LANGFUSE_INIT_ORG_ID pmo-agent
           ensure_env_var LANGFUSE_INIT_ORG_NAME PMO-Agent
           ensure_env_var LANGFUSE_INIT_PROJECT_ID pmo-agent-api
@@ -181,7 +177,7 @@ jobs:
           ensure_env_var LANGFUSE_INIT_PROJECT_SECRET_KEY "lf_sk_$(random_token)"
           ensure_env_var LANGFUSE_INIT_USER_EMAIL admin@pmo-agent.local
           ensure_env_var LANGFUSE_INIT_USER_NAME PMO-Admin
-          ensure_env_var LANGFUSE_INIT_USER_PASSWORD "$(random_base64)"
+          ensure_env_var LANGFUSE_INIT_USER_PASSWORD "$(random_hex)"
 
           docker compose build
           docker compose up -d
