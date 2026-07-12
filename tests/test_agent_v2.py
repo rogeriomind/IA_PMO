@@ -99,6 +99,7 @@ board_list_my_tasks
         mcp_board_doc_path=str(doc_path),
         langfuse_enabled=False,
         agent_api_token="test-token",
+        agent_default_user_roles="board.read,board.write,board.manage",
     )
     fake_tools = FakeBoardToolsV2()
     app = create_app(settings=settings, board_tools_override=fake_tools)
@@ -116,6 +117,12 @@ def _headers(roles: str = "board.read,board.write,board.manage"):
         "X-User-ID": "u1",
         "X-User-Roles": roles,
     }
+
+
+def _headers_without_roles():
+    headers = _headers()
+    headers.pop("X-User-Roles")
+    return headers
 
 
 def _event(event_id: str, message_type: str, *, text: str | None = None, callback_data: str | None = None):
@@ -224,6 +231,32 @@ def test_v2_create_extracts_fields_requires_confirmation_and_replays_event(clien
     ).json()
     assert confirm["status"] == "completed"
     assert client.fake_tools.write_calls[0][0] == "create"
+
+
+def test_v2_confirmation_uses_default_roles_when_header_is_missing(client):
+    create = client.post(
+        "/v2/agent/events",
+        headers=_headers_without_roles(),
+        json=_event(
+            "create-default-roles-1",
+            "text",
+            text="Criar atividade Testar permissoes padrao do board para hoje, prioridade baixa.",
+        ),
+    ).json()
+
+    confirmation_id = create["confirmation"]["id"]
+    confirm = client.post(
+        "/v2/agent/events",
+        headers=_headers_without_roles(),
+        json=_event(
+            "create-default-roles-2",
+            "confirmation",
+            callback_data=f"confirmation:approve:{confirmation_id}",
+        ),
+    ).json()
+
+    assert confirm["status"] == "completed"
+    assert client.fake_tools.write_calls[-1][0] == "create"
 
 
 def test_v2_update_from_list_creates_multiple_operations_and_confirms(client):
