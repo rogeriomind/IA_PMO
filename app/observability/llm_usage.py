@@ -36,6 +36,12 @@ def structured_output_kwargs(provider: str) -> dict[str, Any]:
     return kwargs
 
 
+def chat_model_kwargs(provider: str) -> dict[str, Any]:
+    if provider.strip().lower() == "deepseek":
+        return {"extra_body": {"thinking": {"type": "disabled"}}}
+    return {}
+
+
 def unwrap_structured_output(result: Any) -> Any:
     if isinstance(result, dict) and "parsed" in result and "raw" in result:
         if result.get("parsing_error"):

@@ -11,6 +11,7 @@ from app.agent.extraction.schemas import CreateTaskExtraction, DateExtraction, U
 from app.config import Settings
 from app.mcp.board_tools import normalize_priority
 from app.observability.llm_usage import (
+    chat_model_kwargs,
     estimate_cost_details,
     extract_usage_details,
     structured_output_kwargs,
@@ -51,6 +52,7 @@ class TaskExtractionService:
                     api_key=settings.llm_api_key,
                     base_url=settings.llm_base_url,
                     timeout=30,
+                    **chat_model_kwargs(settings.llm_provider),
                 )
                 kwargs = structured_output_kwargs(settings.llm_provider)
                 self._create_llm = llm.with_structured_output(CreateTaskExtraction, **kwargs)
