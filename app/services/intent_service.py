@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from app.config import Settings
 from app.graph.prompts import CLASSIFIER_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT
 from app.observability.llm_usage import (
+    chat_model_kwargs,
     estimate_cost_details,
     extract_usage_details,
     structured_output_kwargs,
@@ -36,6 +37,7 @@ class IntentService:
                     api_key=settings.llm_api_key,
                     base_url=settings.llm_base_url,
                     timeout=30,
+                    **chat_model_kwargs(settings.llm_provider),
                 )
                 kwargs = structured_output_kwargs(settings.llm_provider)
                 self._classifier = llm.with_structured_output(IntentClassification, **kwargs)

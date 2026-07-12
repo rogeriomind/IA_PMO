@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.observability.llm_usage import (
+    chat_model_kwargs,
     estimate_cost_details,
     extract_usage_details,
     structured_output_kwargs,
@@ -76,4 +77,10 @@ def test_deepseek_structured_output_uses_function_calling_and_raw_result():
     assert structured_output_kwargs("deepseek") == {
         "include_raw": True,
         "method": "function_calling",
+    }
+
+
+def test_deepseek_chat_model_disables_thinking_for_tool_choice():
+    assert chat_model_kwargs("deepseek") == {
+        "extra_body": {"thinking": {"type": "disabled"}},
     }

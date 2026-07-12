@@ -63,6 +63,7 @@ board_list_my_tasks
     )
     settings = Settings(
         ai_provider="deepseek",
+        DEEPSEEK_API_KEY="",
         deepseek_model="deepseek-v4-flash",
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         mcp_board_doc_path=str(doc_path),
