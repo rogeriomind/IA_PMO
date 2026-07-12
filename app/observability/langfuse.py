@@ -284,6 +284,6 @@ class LangfuseTracer:
 
     @staticmethod
     def _update_observation(observation: Any, **kwargs: Any) -> None:
-        clean = {key: sanitize_payload(value) for key, value in kwargs.items()}
+        clean = {key: sanitize_payload(value) for key, value in kwargs.items() if value is not None}
         if hasattr(observation, "update"):
             observation.update(**clean)
