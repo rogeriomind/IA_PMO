@@ -10,6 +10,12 @@ from zoneinfo import ZoneInfo
 from app.agent.extraction.schemas import CreateTaskExtraction, DateExtraction, UpdateTaskExtraction
 from app.config import Settings
 from app.mcp.board_tools import normalize_priority
+from app.observability.llm_usage import (
+    estimate_cost_details,
+    extract_usage_details,
+    structured_output_kwargs,
+    unwrap_structured_output,
+)
 from app.observability.langfuse import LangfuseTracer, TraceContext
 
 logger = logging.getLogger(__name__)
@@ -46,8 +52,9 @@ class TaskExtractionService:
                     base_url=settings.llm_base_url,
                     timeout=30,
                 )
-                self._create_llm = llm.with_structured_output(CreateTaskExtraction)
-                self._update_llm = llm.with_structured_output(UpdateTaskExtraction)
+                kwargs = structured_output_kwargs(settings.llm_provider)
+                self._create_llm = llm.with_structured_output(CreateTaskExtraction, **kwargs)
+                self._update_llm = llm.with_structured_output(UpdateTaskExtraction, **kwargs)
             except Exception:
                 logger.exception("Task extraction LLM initialization failed; local extraction enabled")
 
@@ -81,8 +88,12 @@ class TaskExtractionService:
                 )
                 with generation as observation:
                     result = await self._create_llm.ainvoke(messages)
-                    llm = CreateTaskExtraction.model_validate(result)
-                    self._update_observation(observation, output=llm.model_dump(mode="json"))
+                    llm = CreateTaskExtraction.model_validate(unwrap_structured_output(result))
+                    self._update_observation(
+                        observation,
+                        output=llm.model_dump(mode="json"),
+                        usage_details=extract_usage_details(result),
+                    )
                 local = _extract_create_locally(text, base_date)
                 return _merge_create(llm, local)
             except Exception:
@@ -119,8 +130,12 @@ class TaskExtractionService:
                 )
                 with generation as observation:
                     result = await self._update_llm.ainvoke(messages)
-                    llm = UpdateTaskExtraction.model_validate(result)
-                    self._update_observation(observation, output=llm.model_dump(mode="json"))
+                    llm = UpdateTaskExtraction.model_validate(unwrap_structured_output(result))
+                    self._update_observation(
+                        observation,
+                        output=llm.model_dump(mode="json"),
+                        usage_details=extract_usage_details(result),
+                    )
                 local = _extract_update_locally(text, base_date)
                 return _merge_update(llm, local)
             except Exception:
@@ -158,9 +173,25 @@ class TaskExtractionService:
 
         return nullcontext(None)
 
-    def _update_observation(self, observation: Any | None, *, output: Any) -> None:
+    def _update_observation(
+        self,
+        observation: Any | None,
+        *,
+        output: Any,
+        usage_details: dict[str, int] | None = None,
+    ) -> None:
         if self.tracer and observation:
-            self.tracer.update_observation(observation, output=output)
+            cost_details = estimate_cost_details(
+                usage_details or {},
+                provider=self.settings.llm_provider,
+                model=self.settings.llm_model,
+            )
+            self.tracer.update_observation(
+                observation,
+                output=output,
+                usage_details=usage_details or None,
+                cost_details=cost_details or None,
+            )
 
 
 def _today(timezone: str) -> date:

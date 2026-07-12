@@ -7,6 +7,12 @@ from typing import Any
 
 from app.agent.intents import AgentIntentClassification, WRITE_INTENTS
 from app.config import Settings
+from app.observability.llm_usage import (
+    estimate_cost_details,
+    extract_usage_details,
+    structured_output_kwargs,
+    unwrap_structured_output,
+)
 from app.observability.langfuse import LangfuseTracer, TraceContext
 
 logger = logging.getLogger(__name__)
@@ -168,7 +174,10 @@ class HybridIntentRouter:
                     base_url=settings.llm_base_url,
                     timeout=30,
                 )
-                self._llm = llm.with_structured_output(AgentIntentClassification)
+                self._llm = llm.with_structured_output(
+                    AgentIntentClassification,
+                    **structured_output_kwargs(settings.llm_provider),
+                )
             except Exception:
                 logger.exception("LLM router initialization failed; fallback routing only")
 
@@ -213,8 +222,12 @@ class HybridIntentRouter:
             )
             with generation as observation:
                 result = await self._llm.ainvoke(messages)
-                classification = AgentIntentClassification.model_validate(result)
-                self._update_observation(observation, output=classification.model_dump(mode="json"))
+                classification = AgentIntentClassification.model_validate(unwrap_structured_output(result))
+                self._update_observation(
+                    observation,
+                    output=classification.model_dump(mode="json"),
+                    usage_details=extract_usage_details(result),
+                )
                 return classification
         except Exception:
             logger.exception("LLM classification failed")
@@ -241,9 +254,25 @@ class HybridIntentRouter:
 
         return nullcontext(None)
 
-    def _update_observation(self, observation: Any | None, *, output: Any) -> None:
+    def _update_observation(
+        self,
+        observation: Any | None,
+        *,
+        output: Any,
+        usage_details: dict[str, int] | None = None,
+    ) -> None:
         if self.tracer and observation:
-            self.tracer.update_observation(observation, output=output)
+            cost_details = estimate_cost_details(
+                usage_details or {},
+                provider=self.settings.llm_provider,
+                model=self.settings.llm_model,
+            )
+            self.tracer.update_observation(
+                observation,
+                output=output,
+                usage_details=usage_details or None,
+                cost_details=cost_details or None,
+            )
 
     def _validated(self, classification: AgentIntentClassification) -> AgentIntentClassification:
         if classification.confidence < self.settings.agent_intent_confidence_threshold:

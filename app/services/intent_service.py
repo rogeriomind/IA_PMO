@@ -8,6 +8,12 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.graph.prompts import CLASSIFIER_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT
+from app.observability.llm_usage import (
+    estimate_cost_details,
+    extract_usage_details,
+    structured_output_kwargs,
+    unwrap_structured_output,
+)
 from app.observability.langfuse import LangfuseTracer, TraceContext
 from app.schemas import Intent, IntentClassification, TaskEntities
 
@@ -31,8 +37,9 @@ class IntentService:
                     base_url=settings.llm_base_url,
                     timeout=30,
                 )
-                self._classifier = llm.with_structured_output(IntentClassification)
-                self._extractor = llm.with_structured_output(TaskEntities)
+                kwargs = structured_output_kwargs(settings.llm_provider)
+                self._classifier = llm.with_structured_output(IntentClassification, **kwargs)
+                self._extractor = llm.with_structured_output(TaskEntities, **kwargs)
             except Exception:
                 logger.exception("%s/LangChain initialization failed; local fallback will be used", settings.llm_provider)
         else:
@@ -53,8 +60,12 @@ class IntentService:
                 )
                 with generation as observation:
                     result = await self._classifier.ainvoke(messages)
-                    classification = IntentClassification.model_validate(result)
-                    self._update_observation(observation, output=classification.model_dump(mode="json"))
+                    classification = IntentClassification.model_validate(unwrap_structured_output(result))
+                    self._update_observation(
+                        observation,
+                        output=classification.model_dump(mode="json"),
+                        usage_details=extract_usage_details(result),
+                    )
                 local = self._classify_locally(message)
                 if classification.intent == Intent.UNKNOWN and local.intent != Intent.UNKNOWN:
                     return local
@@ -82,8 +93,12 @@ class IntentService:
                 )
                 with generation as observation:
                     result = await self._extractor.ainvoke(messages)
-                    entities = TaskEntities.model_validate(result)
-                    self._update_observation(observation, output=entities.model_dump(mode="json"))
+                    entities = TaskEntities.model_validate(unwrap_structured_output(result))
+                    self._update_observation(
+                        observation,
+                        output=entities.model_dump(mode="json"),
+                        usage_details=extract_usage_details(result),
+                    )
                 local_entities = self._extract_locally(message, intent)
                 return self._merge_entities(entities, local_entities)
             except Exception:
@@ -149,9 +164,25 @@ class IntentService:
 
         return nullcontext(None)
 
-    def _update_observation(self, observation: Any | None, *, output: Any) -> None:
+    def _update_observation(
+        self,
+        observation: Any | None,
+        *,
+        output: Any,
+        usage_details: dict[str, int] | None = None,
+    ) -> None:
         if self.tracer and observation:
-            self.tracer.update_observation(observation, output=output)
+            cost_details = estimate_cost_details(
+                usage_details or {},
+                provider=self.settings.llm_provider,
+                model=self.settings.llm_model,
+            )
+            self.tracer.update_observation(
+                observation,
+                output=output,
+                usage_details=usage_details or None,
+                cost_details=cost_details or None,
+            )
 
     def _classify_locally(self, message: str) -> IntentClassification:
         text = message.casefold().strip()
