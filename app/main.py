@@ -34,6 +34,7 @@ from app.application.draft_service import DraftService
 from app.application.memory_service import MemoryService
 from app.application.task_selection_service import TaskSelectionService
 from app.api.middleware import install_correlation_middleware
+from app.api.routes.admin_tenants import router as admin_tenants_router
 from app.api.routes.agent_v1 import router as agent_v1_router
 from app.api.routes.agent_v2 import router as agent_v2_router
 from app.config import Settings, get_settings
@@ -63,6 +64,7 @@ from app.services.pending_action_service import PendingActionService
 from app.services.response_service import ResponseService
 from app.storage.repository import PendingActionRepository
 from app.structured_logging import configure_logging
+from app.tenancy import ControlPlaneRepository, SecretEncryptionService, TenantConfigurationService
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +109,11 @@ def create_app(
 
         repository = repository_override or PendingActionRepository(app_settings)
         repository.init_db()
+        encryption = SecretEncryptionService(
+            app_settings.encryption_key.get_secret_value() if app_settings.encryption_key else None
+        )
+        control_plane = ControlPlaneRepository(app_settings, encryption)
+        control_plane.init_db()
 
         mcp_client = MCPBoardClient(app_settings)
         board_tools = board_tools_override or BoardTools(mcp_client)
@@ -126,6 +133,8 @@ def create_app(
 
         app.state.settings = app_settings
         app.state.repository = repository
+        app.state.control_plane = control_plane
+        app.state.tenant_config_service = TenantConfigurationService(control_plane)
         app.state.mcp_client = mcp_client
         app.state.board_tools = board_tools
         app.state.tracer = tracer
@@ -253,6 +262,7 @@ def create_app(
 
     api = FastAPI(title="PMO AI Agent API", version="0.2.0", lifespan=lifespan)
     install_correlation_middleware(api)
+    api.include_router(admin_tenants_router)
     if route_settings.v1_endpoints_enabled:
         api.include_router(agent_v1_router)
     if route_settings.v2_endpoints_enabled:
