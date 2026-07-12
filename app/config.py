@@ -34,9 +34,11 @@ class Settings(BaseSettings):
     )
 
     database_url: str = Field(default="", alias="DATABASE_URL")
+    encryption_key: SecretStr | None = Field(default=None, alias="ENCRYPTION_KEY")
 
     redis_enabled: bool = Field(default=False, alias="REDIS_ENABLED")
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
+    multi_tenant_enabled: bool = Field(default=True, alias="MULTI_TENANT_ENABLED")
 
     mcp_board_url: str = Field(default="", alias="MCP_BOARD_URL")
     mcp_board_transport: Literal["http", "streamable_http", "sse", "stdio"] | str = Field(

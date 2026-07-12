@@ -179,12 +179,16 @@ jobs:
           ensure_env_var LANGFUSE_INIT_USER_NAME PMO-Admin
           ensure_env_var LANGFUSE_INIT_USER_PASSWORD "$(random_hex)"
           ensure_env_var AGENT_DEFAULT_USER_ROLES board.read,board.write,board.manage
+          ensure_env_var MULTI_TENANT_ENABLED true
+          ensure_env_var ENCRYPTION_KEY "$(random_hex)"
           langfuse_init_public_key="$(grep -m1 '^LANGFUSE_INIT_PROJECT_PUBLIC_KEY=' .env | cut -d= -f2-)"
           langfuse_init_secret_key="$(grep -m1 '^LANGFUSE_INIT_PROJECT_SECRET_KEY=' .env | cut -d= -f2-)"
           ensure_env_var LANGFUSE_PUBLIC_KEY "$langfuse_init_public_key"
           ensure_env_var LANGFUSE_SECRET_KEY "$langfuse_init_secret_key"
 
           docker compose build
+          docker compose up -d postgres
+          docker compose run --rm pmo-ai-agent-api alembic upgrade head
           docker compose up -d
 
           for _ in $(seq 1 24); do

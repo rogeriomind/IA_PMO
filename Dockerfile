@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml ./
+COPY alembic.ini ./
 COPY app ./app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends docker.io docker-compose \

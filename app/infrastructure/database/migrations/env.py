@@ -7,13 +7,14 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import get_settings
 from app.storage.repository import Base
+from app.tenancy.control_plane import TenantBase
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata
+target_metadata = [Base.metadata, TenantBase.metadata]
 
 
 def _database_url() -> str:

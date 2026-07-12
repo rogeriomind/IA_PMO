@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from uuid import uuid4
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.config import Settings
+from app.tenancy.context import TenantContext
 
 
-@dataclass(frozen=True)
-class RequestContext:
-    request_id: str
-    correlation_id: str
-    tenant_id: str
-    user_id: str
-    user_roles: list[str]
+RequestContext = TenantContext
 
 
 async def get_request_context(
@@ -23,8 +17,10 @@ async def get_request_context(
     x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
     x_correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    x_tenant_slug: str | None = Header(default=None, alias="X-Tenant-Slug"),
     x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     x_user_roles: str | None = Header(default=None, alias="X-User-Roles"),
+    x_channel: str | None = Header(default=None, alias="X-Channel"),
 ) -> RequestContext:
     settings: Settings = request.app.state.settings
     authenticated = _validate_agent_token(settings, authorization, required=settings.is_production)
@@ -33,12 +29,15 @@ async def get_request_context(
     correlation_id = x_correlation_id or request_id
     roles = _parse_roles(x_user_roles) if authenticated or not settings.is_production else []
     roles = roles or settings.default_user_roles
-    return RequestContext(
+    tenant_id = x_tenant_id or settings.agent_default_tenant_id
+    return TenantContext(
         request_id=request_id,
         correlation_id=correlation_id,
-        tenant_id=x_tenant_id or settings.agent_default_tenant_id,
+        tenant_id=tenant_id,
+        tenant_slug=x_tenant_slug or tenant_id,
         user_id=x_user_id or settings.agent_default_user_id,
-        user_roles=roles,
+        roles=roles,
+        channel=x_channel,
     )
 
 
@@ -48,20 +47,25 @@ async def get_authenticated_request_context(
     x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
     x_correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    x_tenant_slug: str | None = Header(default=None, alias="X-Tenant-Slug"),
     x_user_id: str | None = Header(default=None, alias="X-User-ID"),
     x_user_roles: str | None = Header(default=None, alias="X-User-Roles"),
+    x_channel: str | None = Header(default=None, alias="X-Channel"),
 ) -> RequestContext:
     settings: Settings = request.app.state.settings
     authenticated = _validate_agent_token(settings, authorization, required=True)
     request_id = x_request_id or str(uuid4())
     correlation_id = x_correlation_id or request_id
     roles = _parse_roles(x_user_roles) if authenticated else []
-    return RequestContext(
+    tenant_id = x_tenant_id or settings.agent_default_tenant_id
+    return TenantContext(
         request_id=request_id,
         correlation_id=correlation_id,
-        tenant_id=x_tenant_id or settings.agent_default_tenant_id,
+        tenant_id=tenant_id,
+        tenant_slug=x_tenant_slug or tenant_id,
         user_id=x_user_id or settings.agent_default_user_id,
-        user_roles=roles or settings.default_user_roles,
+        roles=roles or settings.default_user_roles,
+        channel=x_channel,
     )
 
 
@@ -69,7 +73,7 @@ async def get_admin_request_context(
     context: RequestContext = Depends(get_authenticated_request_context),
 ) -> RequestContext:
     roles = set(context.user_roles or [])
-    if not roles.intersection({"admin", "agent.admin"}):
+    if not roles.intersection({"admin", "platform.admin", "tenant.admin", "agent.admin"}):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
     return context
 

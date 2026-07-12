@@ -55,6 +55,8 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 LLM_VALIDATE_MODEL_ON_HEALTH=true
 DATABASE_URL=
+ENCRYPTION_KEY=
+MULTI_TENANT_ENABLED=true
 MCP_BOARD_URL=docker compose -f /opt/board_pmo/docker-compose.yml exec -T api node apps/api/dist/mcp/server.js
 MCP_BOARD_TRANSPORT=stdio
 LANGFUSE_ENABLED=true
@@ -69,6 +71,19 @@ O provedor padrao e `deepseek`. A implementacao usa `langchain-openai` porque a 
 O MCP do board documentado em `/opt/shared/mcp/board_pmo.md` usa transporte `stdio` executando o servidor dentro do container `api` do projeto `/opt/board_pmo`. Por isso o compose monta `/var/run/docker.sock` e `/opt/board_pmo` no container da API.
 
 Se `DATABASE_URL` estiver vazio, o servico usa SQLite local apenas para desenvolvimento. Em producao, use Postgres.
+
+## Control plane multi-tenant
+
+A API possui uma camada administrativa em `/admin/v1/tenants` para cadastrar tenants, canais, usuarios, roles, configuracao de IA, politicas, integracoes, rate limits, feature flags, secrets criptografados e versoes publicadas.
+
+Documentacao:
+
+- `docs/multi-tenant-architecture.md`
+- `docs/tenant-resolution.md`
+- `docs/tenant-security.md`
+- `docs/tenant-configuration.md`
+- `docs/migration-guide.md`
+- `docs/control-plane-api.md`
 
 O `/health` valida a disponibilidade do modelo por padrao. Para desativar essa chamada externa em probes muito frequentes:
 
