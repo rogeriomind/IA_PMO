@@ -6,9 +6,11 @@
 POST /v2/agent/events
 Authorization: Bearer ${AGENT_API_TOKEN}
 Content-Type: application/json
+X-User-Roles: board.read,board.write,board.manage
 ```
 
 O worker deve manter o mesmo `thread_id` para a conversa inteira. O `event_id` precisa ser estavel para replay da fila ou do Telegram.
+Se o worker nao enviar `X-User-Roles`, a API usa `AGENT_DEFAULT_USER_ROLES`. Para executar escritas no board, o valor precisa incluir `board.write` ou `board.manage`, conforme a tool.
 
 ## Envelope
 
