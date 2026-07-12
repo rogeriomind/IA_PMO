@@ -76,7 +76,10 @@ class Settings(BaseSettings):
     langfuse_enabled: bool = Field(default=True, alias="LANGFUSE_ENABLED")
     langfuse_public_key: SecretStr | None = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: SecretStr | None = Field(default=None, alias="LANGFUSE_SECRET_KEY")
-    langfuse_host: str = Field(default="", alias="LANGFUSE_HOST")
+    langfuse_host: str = Field(
+        default="",
+        validation_alias=AliasChoices("LANGFUSE_HOST", "LANGFUSE_BASE_URL"),
+    )
 
     agent_api_port: int = Field(default=8010, alias="AGENT_API_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

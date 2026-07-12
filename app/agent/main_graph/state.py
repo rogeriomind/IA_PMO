@@ -53,3 +53,6 @@ class PMOAgentState(TypedDict, total=False):
     intent: str | None
     error_code: str | None
     error_message: str | None
+
+    trace_id: str | None
+    _trace: Any

@@ -178,6 +178,10 @@ jobs:
           ensure_env_var LANGFUSE_INIT_USER_EMAIL admin@pmo-agent.local
           ensure_env_var LANGFUSE_INIT_USER_NAME PMO-Admin
           ensure_env_var LANGFUSE_INIT_USER_PASSWORD "$(random_hex)"
+          langfuse_init_public_key="$(grep -m1 '^LANGFUSE_INIT_PROJECT_PUBLIC_KEY=' .env | cut -d= -f2-)"
+          langfuse_init_secret_key="$(grep -m1 '^LANGFUSE_INIT_PROJECT_SECRET_KEY=' .env | cut -d= -f2-)"
+          ensure_env_var LANGFUSE_PUBLIC_KEY "$langfuse_init_public_key"
+          ensure_env_var LANGFUSE_SECRET_KEY "$langfuse_init_secret_key"
 
           docker compose build
           docker compose up -d

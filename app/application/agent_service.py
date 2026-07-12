@@ -60,7 +60,11 @@ class AgentV2Service:
         )
         try:
             async with self.thread_locks.acquire(tenant_id=payload.tenant_id, thread_id=payload.thread_id):
-                state = _state_from_payload(payload, context)
+                state = {
+                    **_state_from_payload(payload, context),
+                    "trace_id": trace.trace_id,
+                    "_trace": trace,
+                }
                 result: PMOAgentState = await self.graph.ainvoke(state)
         except ThreadLockedError:
             result = _conflict_state(payload)

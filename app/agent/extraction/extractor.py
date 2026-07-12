@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from app.agent.extraction.schemas import CreateTaskExtraction, DateExtraction, UpdateTaskExtraction
 from app.config import Settings
 from app.mcp.board_tools import normalize_priority
+from app.observability.langfuse import LangfuseTracer, TraceContext
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,9 @@ retorne null para informacao ausente; callbacks de botao nao devem ser interpret
 
 
 class TaskExtractionService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, tracer: LangfuseTracer | None = None):
         self.settings = settings
+        self.tracer = tracer
         self._create_llm = None
         self._update_llm = None
         if settings.llm_configured:
@@ -55,20 +57,32 @@ class TaskExtractionService:
         *,
         today: date | None = None,
         timezone: str = "America/Sao_Paulo",
+        trace: TraceContext | None = None,
     ) -> CreateTaskExtraction:
         base_date = today or _today(timezone)
         if self._create_llm:
             try:
-                result = await self._create_llm.ainvoke(
-                    [
-                        ("system", CREATE_SYSTEM_PROMPT),
-                        (
-                            "human",
-                            f"Data atual: {base_date.isoformat()}\nTimezone: {timezone}\nMensagem: {text}",
-                        ),
-                    ]
+                messages = [
+                    ("system", CREATE_SYSTEM_PROMPT),
+                    (
+                        "human",
+                        f"Data atual: {base_date.isoformat()}\nTimezone: {timezone}\nMensagem: {text}",
+                    ),
+                ]
+                generation = self._generation(
+                    trace,
+                    "task_create.extract",
+                    input_payload=messages,
+                    metadata={
+                        "provider": self.settings.llm_provider,
+                        "schema": "CreateTaskExtraction",
+                        "timezone": timezone,
+                    },
                 )
-                llm = CreateTaskExtraction.model_validate(result)
+                with generation as observation:
+                    result = await self._create_llm.ainvoke(messages)
+                    llm = CreateTaskExtraction.model_validate(result)
+                    self._update_observation(observation, output=llm.model_dump(mode="json"))
                 local = _extract_create_locally(text, base_date)
                 return _merge_create(llm, local)
             except Exception:
@@ -81,20 +95,32 @@ class TaskExtractionService:
         *,
         today: date | None = None,
         timezone: str = "America/Sao_Paulo",
+        trace: TraceContext | None = None,
     ) -> UpdateTaskExtraction:
         base_date = today or _today(timezone)
         if self._update_llm:
             try:
-                result = await self._update_llm.ainvoke(
-                    [
-                        ("system", UPDATE_SYSTEM_PROMPT),
-                        (
-                            "human",
-                            f"Data atual: {base_date.isoformat()}\nTimezone: {timezone}\nMensagem: {text}",
-                        ),
-                    ]
+                messages = [
+                    ("system", UPDATE_SYSTEM_PROMPT),
+                    (
+                        "human",
+                        f"Data atual: {base_date.isoformat()}\nTimezone: {timezone}\nMensagem: {text}",
+                    ),
+                ]
+                generation = self._generation(
+                    trace,
+                    "task_update.extract",
+                    input_payload=messages,
+                    metadata={
+                        "provider": self.settings.llm_provider,
+                        "schema": "UpdateTaskExtraction",
+                        "timezone": timezone,
+                    },
                 )
-                llm = UpdateTaskExtraction.model_validate(result)
+                with generation as observation:
+                    result = await self._update_llm.ainvoke(messages)
+                    llm = UpdateTaskExtraction.model_validate(result)
+                    self._update_observation(observation, output=llm.model_dump(mode="json"))
                 local = _extract_update_locally(text, base_date)
                 return _merge_update(llm, local)
             except Exception:
@@ -110,6 +136,31 @@ class TaskExtractionService:
     ) -> DateExtraction:
         base_date = today or _today(timezone)
         return DateExtraction(due_date=_extract_due_date(text, base_date))
+
+    def _generation(
+        self,
+        trace: TraceContext | None,
+        name: str,
+        *,
+        input_payload: Any,
+        metadata: dict[str, Any],
+    ):
+        if self.tracer:
+            return self.tracer.generation(
+                trace,
+                name,
+                input_payload=input_payload,
+                metadata=metadata,
+                model=self.settings.llm_model,
+                model_parameters={"timeout": 30},
+            )
+        from contextlib import nullcontext
+
+        return nullcontext(None)
+
+    def _update_observation(self, observation: Any | None, *, output: Any) -> None:
+        if self.tracer and observation:
+            self.tracer.update_observation(observation, output=output)
 
 
 def _today(timezone: str) -> date:

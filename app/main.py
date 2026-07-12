@@ -111,7 +111,7 @@ def create_app(
         mcp_client = MCPBoardClient(app_settings)
         board_tools = board_tools_override or BoardTools(mcp_client)
         tracer = LangfuseTracer(app_settings)
-        intent_service = IntentService(app_settings)
+        intent_service = IntentService(app_settings, tracer=tracer)
         response_service = ResponseService()
         pending_actions = PendingActionService(repository)
         confirmation_service = ConfirmationService(pending_actions, board_tools)
@@ -144,7 +144,7 @@ def create_app(
             repository=repository,
             result_max_chars=app_settings.agent_tool_result_max_chars,
         )
-        v1_router = HybridIntentRouter(app_settings)
+        v1_router = HybridIntentRouter(app_settings, tracer=tracer)
         observability = ObservabilityService(tracer)
         task_query_subgraph = build_task_query_subgraph(TaskQueryNodes(gateway))
         task_write_subgraph = build_task_write_subgraph(TaskWriteNodes(gateway, repository))
@@ -173,7 +173,7 @@ def create_app(
         memory_service = MemoryService(repository, app_settings)
         selection_service = TaskSelectionService(repository, app_settings)
         draft_service = DraftService(repository, app_settings)
-        extraction_service = TaskExtractionService(app_settings)
+        extraction_service = TaskExtractionService(app_settings, tracer=tracer)
         assignee_resolver = AssigneeResolver()
         v2_confirmation_service = AgentV2ConfirmationService(repository, gateway)
         welcome_subgraph = WelcomeMenuSubgraph()
@@ -366,7 +366,7 @@ def create_app(
             input_payload=payload.model_dump(),
         )
         try:
-            classification = await api.state.intent_service.classify(payload.input_text)
+            classification = await api.state.intent_service.classify(payload.input_text, trace=trace)
             entities = {}
             if classification.intent in {
                 Intent.TASK_CREATE,
@@ -377,6 +377,7 @@ def create_app(
                 extracted = await api.state.intent_service.extract_entities(
                     payload.input_text,
                     classification.intent,
+                    trace=trace,
                 )
                 entities = extracted.model_dump(exclude_none=True)
             response = _build_external_agent_response(
