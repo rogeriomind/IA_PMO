@@ -36,3 +36,30 @@ jobs:
         run: |
           python -m compileall app examples tests
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: admin-web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: admin-web
+        run: npm ci
+
+      - name: Lint frontend
+        working-directory: admin-web
+        run: npm run lint
+
+      - name: Typecheck frontend
+        working-directory: admin-web
+        run: npm run typecheck
+
+      - name: Test frontend
+        working-directory: admin-web
+        run: npm run test
+
+      - name: Build frontend
+        working-directory: admin-web
+        run: npm run build
+

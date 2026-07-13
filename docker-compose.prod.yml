@@ -12,10 +12,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - pmo_internal
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
+    networks:
+      - pmo_internal
     restart: unless-stopped
 
   pmo-ai-agent-api:
@@ -34,12 +38,40 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    networks:
+      - pmo_internal
     volumes:
       - /opt/shared/mcp:/opt/shared/mcp:ro
       - /opt/board_pmo:/opt/board_pmo:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8010/health')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ia-pmo-admin-web:
+    container_name: ia-pmo-admin-web
+    build:
+      context: ./admin-web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_USE_MOCK_API: "false"
+    expose:
+      - "80"
+    depends_on:
+      pmo-ai-agent-api:
+        condition: service_healthy
+    networks:
+      - pmo_internal
     restart: unless-stopped
 
 volumes:
   pmo_agent_postgres:
+
+networks:
+  pmo_internal:
+    driver: bridge
