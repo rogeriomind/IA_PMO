@@ -50,6 +50,28 @@ services:
     networks:
       - pmo_internal
       - board_pmo_default
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8010/health')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ia-pmo-admin-web:
+    container_name: ia-pmo-admin-web
+    build:
+      context: ./admin-web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_USE_MOCK_API: "false"
+    expose:
+      - "80"
+    depends_on:
+      pmo-ai-agent-api:
+        condition: service_healthy
+    networks:
+      - pmo_internal
     restart: unless-stopped
 
   langfuse-worker:

@@ -18,6 +18,51 @@ Worker atual
 
 Toda acao de escrita cria antes um registro em `pending_actions`. O MCP so e chamado para escrita depois de `confirmed=true` em `/agent/confirm`.
 
+## Monorepo e admin-web
+
+O repositorio agora contem dois artefatos deployaveis:
+
+- Backend FastAPI/LangGraph na raiz, servido pelo container `pmo-ai-agent-api` na porta `8010`.
+- Frontend administrativo React em `admin-web`, servido pelo container `ia-pmo-admin-web` via Nginx na porta interna `80`.
+
+Arquitetura de dominio unico:
+
+```mermaid
+flowchart TD
+    User[Usuario] --> Proxy[Caddy ou Nginx]
+    Proxy -->|/| Front[React + Nginx]
+    Proxy -->|/api| API[FastAPI + LangGraph]
+    API --> DB[(PostgreSQL)]
+    API --> Redis[(Redis)]
+    API --> MCP[MCP Board]
+    API --> Langfuse[Langfuse]
+```
+
+Rotas esperadas no proxy:
+
+```text
+/      -> ia-pmo-admin-web:80
+/api/* -> pmo-ai-agent-api:8010
+```
+
+Para rodar o frontend isolado com mocks:
+
+```bash
+cd admin-web
+npm install
+npm run dev
+```
+
+Para validar o frontend:
+
+```bash
+cd admin-web
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+```
+
 ## MCP Board PMO
 
 O arquivo `/opt/shared/mcp/board_pmo.md` e a fonte de verdade das tools do board. O container monta `/opt/shared/mcp` como volume somente leitura e o servico carrega `MCP_BOARD_DOC_PATH` no startup.
@@ -310,6 +355,18 @@ Exemplos de cliente: `examples/worker/pmo_agent_client.py` e `examples/worker/pr
 O fluxo recomendado e abrir Pull Request contra `main`. O workflow `CI` valida testes no PR. Depois do merge em `main`, o workflow `Deploy VPS` atualiza automaticamente a VPS em `/opt/pmo-ai-agent-api`, preservando `.env` e bancos locais.
 
 Detalhes: `docs/github-vps-automation.md`.
+
+Deploy seletivo do backend e frontend na VPS:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build pmo-ai-agent-api ia-pmo-admin-web
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml exec -T pmo-ai-agent-api \
+  python -c "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"
+docker compose -f docker-compose.prod.yml exec -T ia-pmo-admin-web wget -qO- http://localhost/health
+```
+
+Para rollback, volte a imagem/tag ou commit anterior e recrie somente os servicos afetados. Nao use `docker compose down -v`, pois os volumes de PostgreSQL, Redis e Langfuse devem ser preservados.
 
 ## Integracao legada com o worker
 

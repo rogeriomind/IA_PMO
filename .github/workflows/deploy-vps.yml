@@ -34,6 +34,25 @@ jobs:
         run: |
           python -m pytest
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: admin-web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: admin-web
+        run: npm ci
+
+      - name: Validate frontend
+        working-directory: admin-web
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build
+
   deploy:
     name: deploy
     runs-on: ubuntu-latest
@@ -189,6 +208,7 @@ jobs:
           docker compose build
           docker compose up -d postgres
           docker compose run --rm pmo-ai-agent-api alembic upgrade head
+          docker compose up -d --build pmo-ai-agent-api ia-pmo-admin-web
           docker compose up -d
 
           for _ in $(seq 1 24); do
@@ -200,6 +220,9 @@ jobs:
           done
 
           curl -fsS "http://localhost:${AGENT_PORT}/ready"
+          docker compose exec -T pmo-ai-agent-api \
+            python -c "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"
+          docker compose exec -T ia-pmo-admin-web wget -qO- http://localhost/health
           curl -fsS "http://localhost:${LANGFUSE_WEB_PORT:-3000}/api/public/health" || true
           docker compose ps
           rm -rf "$release_dir" "$archive"

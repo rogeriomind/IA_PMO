@@ -34,6 +34,7 @@ from app.application.draft_service import DraftService
 from app.application.memory_service import MemoryService
 from app.application.task_selection_service import TaskSelectionService
 from app.api.middleware import install_correlation_middleware
+from app.api.routes.admin_console import router as admin_console_router
 from app.api.routes.admin_tenants import router as admin_tenants_router
 from app.api.routes.agent_v1 import router as agent_v1_router
 from app.api.routes.agent_v2 import router as agent_v2_router
@@ -262,6 +263,7 @@ def create_app(
 
     api = FastAPI(title="PMO AI Agent API", version="0.2.0", lifespan=lifespan)
     install_correlation_middleware(api)
+    api.include_router(admin_console_router)
     api.include_router(admin_tenants_router)
     if route_settings.v1_endpoints_enabled:
         api.include_router(agent_v1_router)
