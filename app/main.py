@@ -117,6 +117,12 @@ def create_app(
 
         mcp_client = MCPBoardClient(app_settings)
         board_tools = board_tools_override or BoardTools(mcp_client)
+        gateway_board_tools = board_tools_override or BoardTools(mcp_client, read_retries=0)
+        if board_tools_override is None:
+            try:
+                await mcp_client.startup()
+            except Exception:
+                logger.exception("Failed to start persistent MCP session pool; MCP calls will retry lazily")
         tracer = LangfuseTracer(app_settings)
         intent_service = IntentService(app_settings, tracer=tracer)
         response_service = ResponseService()
@@ -149,7 +155,7 @@ def create_app(
         )
         gateway = MCPGateway(
             registry=tool_registry,
-            executor=BoardToolsExecutor(board_tools),
+            executor=BoardToolsExecutor(gateway_board_tools),
             repository=repository,
             result_max_chars=app_settings.agent_tool_result_max_chars,
         )
@@ -258,6 +264,7 @@ def create_app(
         try:
             yield
         finally:
+            await mcp_client.close()
             tracer.flush()
 
     api = FastAPI(title="PMO AI Agent API", version="0.2.0", lifespan=lifespan)

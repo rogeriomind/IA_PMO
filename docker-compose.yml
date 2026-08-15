@@ -32,6 +32,10 @@ services:
     env_file:
       - .env
     environment:
+      MCP_BOARD_TRANSPORT: "${MCP_BOARD_TRANSPORT:-streamable_http}"
+      MCP_BOARD_URL: "${MCP_BOARD_URL:-http://mcp-board:8011/mcp}"
+      MCP_PERSISTENT_SESSIONS_ENABLED: "${MCP_PERSISTENT_SESSIONS_ENABLED:-true}"
+      MCP_SESSION_POOL_SIZE: "${MCP_SESSION_POOL_SIZE:-2}"
       LANGFUSE_ENABLED: "${LANGFUSE_ENABLED:-true}"
       LANGFUSE_HOST: "${LANGFUSE_HOST:-http://langfuse-web:3000}"
       LANGFUSE_BASE_URL: "${LANGFUSE_BASE_URL:-}"
@@ -47,6 +51,26 @@ services:
       - /opt/board_pmo:/opt/board_pmo:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
+    networks:
+      - pmo_internal
+      - board_pmo_default
+    restart: unless-stopped
+
+  mcp-board:
+    image: "${MCP_BOARD_IMAGE:-node:22-alpine}"
+    container_name: pmo-mcp-board
+    profiles:
+      - mcp-board
+    working_dir: "${MCP_BOARD_WORKDIR:-/opt/board_pmo}"
+    command: "${MCP_BOARD_COMMAND:-node apps/api/dist/mcp/server.js --transport streamable-http --host 0.0.0.0 --port 8011 --path /mcp}"
+    environment:
+      MCP_BOARD_TRANSPORT: streamable_http
+      PORT: "${MCP_BOARD_PORT:-8011}"
+    expose:
+      - "${MCP_BOARD_PORT:-8011}"
+    volumes:
+      - /opt/shared/mcp:/opt/shared/mcp:ro
+      - /opt/board_pmo:/opt/board_pmo:ro
     networks:
       - pmo_internal
       - board_pmo_default

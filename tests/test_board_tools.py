@@ -8,7 +8,7 @@ class FakeClient:
     def __init__(self):
         self.calls = []
 
-    async def call_semantic_tool(self, internal_name, arguments, *, read_only):
+    async def call_semantic_tool(self, internal_name, arguments, *, read_only, read_retries=None):
         self.calls.append((internal_name, arguments, read_only))
         if internal_name == "search_tasks":
             return {"tasks": [{"id": "TASK-1", "title": "Configurar lembrete automatico"}]}

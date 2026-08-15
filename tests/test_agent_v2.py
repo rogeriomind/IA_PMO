@@ -154,6 +154,9 @@ def test_v2_welcome_with_name_returns_main_menu(client):
     assert body["status"] == "waiting_user_input"
     assert body["flow"] == "main_menu"
     assert "Rogerio" in body["message"]
+    assert body["data"]["latency"]["agent_total_ms"] >= 0
+    assert body["data"]["latency"]["request_received_at"]
+    assert body["data"]["latency"]["response_built_at"]
     assert [option["callback_data"] for option in body["ui"]["options"]] == [
         "menu:status",
         "menu:create",

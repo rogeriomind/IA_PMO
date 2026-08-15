@@ -4,6 +4,7 @@ from typing import Any
 
 from app.agent.main_graph.routing import global_command, infer_menu_from_text
 from app.agent.main_graph.state import PMOAgentState
+from app.agent.latency import finish_latency_stage, mark_latency, mark_latency_once
 from app.agent.subgraphs.common import inline_keyboard, ui_none
 from app.agent.subgraphs.confirmation.nodes import ConfirmationSubgraph
 from app.agent.subgraphs.questions.nodes import QuestionsSubgraph
@@ -62,25 +63,29 @@ class PMOMainGraphNodes:
         }
 
     async def load_thread_memory(self, state: PMOAgentState) -> PMOAgentState:
-        if state.get("message_type") == "reset":
-            return {}
-        thread = await self.memory.load_thread(tenant_id=state["tenant_id"], thread_id=state["thread_id"])
-        if not thread:
-            return {}
-        summary = thread.get("state_summary") or {}
-        return {
-            "current_flow": summary.get("current_flow") or thread.get("current_flow"),
-            "current_step": summary.get("current_step") or thread.get("current_step"),
-            "previous_flow": summary.get("previous_flow"),
-            "previous_step": summary.get("previous_step"),
-            "selected_menu": summary.get("selected_menu"),
-            "selected_task_id": summary.get("selected_task_id"),
-            "selected_task_number": summary.get("selected_task_number"),
-            "task_selection_map": summary.get("task_selection_map") or {},
-            "create_draft": summary.get("create_draft") or {},
-            "update_draft": summary.get("update_draft") or {},
-            "pending_action_id": summary.get("pending_action_id"),
-        }
+        mark_latency("memory_load_started_at")
+        try:
+            if state.get("message_type") == "reset":
+                return {}
+            thread = await self.memory.load_thread(tenant_id=state["tenant_id"], thread_id=state["thread_id"])
+            if not thread:
+                return {}
+            summary = thread.get("state_summary") or {}
+            return {
+                "current_flow": summary.get("current_flow") or thread.get("current_flow"),
+                "current_step": summary.get("current_step") or thread.get("current_step"),
+                "previous_flow": summary.get("previous_flow"),
+                "previous_step": summary.get("previous_step"),
+                "selected_menu": summary.get("selected_menu"),
+                "selected_task_id": summary.get("selected_task_id"),
+                "selected_task_number": summary.get("selected_task_number"),
+                "task_selection_map": summary.get("task_selection_map") or {},
+                "create_draft": summary.get("create_draft") or {},
+                "update_draft": summary.get("update_draft") or {},
+                "pending_action_id": summary.get("pending_action_id"),
+            }
+        finally:
+            finish_latency_stage("memory_load")
 
     async def normalize_event(self, state: PMOAgentState) -> PMOAgentState:
         return {
@@ -89,6 +94,7 @@ class PMOMainGraphNodes:
         }
 
     async def handle_global_commands(self, state: PMOAgentState) -> PMOAgentState:
+        mark_latency_once("routing_started_at")
         command = global_command(state)
         if not command:
             return {}
@@ -116,56 +122,64 @@ class PMOMainGraphNodes:
         }
 
     async def resolve_current_flow(self, state: PMOAgentState) -> PMOAgentState:
-        if state.get("route"):
-            return {}
-        message_type = state.get("message_type")
-        callback = state.get("callback_data") or ""
-        if message_type == "welcome":
+        try:
+            if state.get("route"):
+                return {}
+            message_type = state.get("message_type")
+            callback = state.get("callback_data") or ""
+            if message_type == "welcome":
+                return {"route": "welcome"}
+            if callback.startswith("confirmation:") or message_type == "confirmation" or state.get("current_flow") == "confirmation":
+                return {"route": "confirmation"}
+            menu_route = _route_from_menu_callback(callback)
+            if menu_route:
+                return {
+                    "selected_menu": menu_route,
+                    "previous_flow": state.get("current_flow"),
+                    "previous_step": state.get("current_step"),
+                    "route": menu_route,
+                }
+            if callback.startswith("status:") or state.get("current_flow") == "status":
+                return {"route": "status"}
+            if callback.startswith("update:") or state.get("current_flow") == "task_update":
+                return {"route": "task_update"}
+            if callback.startswith("create:") or state.get("current_flow") == "task_create":
+                return {"route": "task_create"}
+            inferred = infer_menu_from_text(state.get("message_text"))
+            if inferred:
+                return {"selected_menu": inferred, "route": inferred}
             return {"route": "welcome"}
-        if callback.startswith("confirmation:") or message_type == "confirmation" or state.get("current_flow") == "confirmation":
-            return {"route": "confirmation"}
-        menu_route = _route_from_menu_callback(callback)
-        if menu_route:
-            return {
-                "selected_menu": menu_route,
-                "previous_flow": state.get("current_flow"),
-                "previous_step": state.get("current_step"),
-                "route": menu_route,
-            }
-        if callback.startswith("status:") or state.get("current_flow") == "status":
-            return {"route": "status"}
-        if callback.startswith("update:") or state.get("current_flow") == "task_update":
-            return {"route": "task_update"}
-        if callback.startswith("create:") or state.get("current_flow") == "task_create":
-            return {"route": "task_create"}
-        inferred = infer_menu_from_text(state.get("message_text"))
-        if inferred:
-            return {"selected_menu": inferred, "route": inferred}
-        return {"route": "welcome"}
+        finally:
+            finish_latency_stage("routing")
 
     async def route_to_subgraph(self, state: PMOAgentState) -> PMOAgentState:
         if state.get("route") == "response_ready":
             return {}
         route = state.get("route") or "welcome"
-        if route == "welcome":
+        mark_latency("subgraph_started_at")
+        try:
+            if route == "welcome":
+                return await self.welcome.handle(state)
+            if route == "status":
+                return await self.status.handle(state)
+            if route == "create":
+                return await self.create_task.handle({**state, "current_flow": "task_create"})
+            if route == "task_create":
+                return await self.create_task.handle(state)
+            if route == "update":
+                return await self.update_task.handle({**state, "current_flow": "task_update"})
+            if route == "task_update":
+                return await self.update_task.handle(state)
+            if route == "questions":
+                return await self.questions.handle(state)
+            if route == "confirmation":
+                return await self.confirmation.handle(state)
             return await self.welcome.handle(state)
-        if route == "status":
-            return await self.status.handle(state)
-        if route == "create":
-            return await self.create_task.handle({**state, "current_flow": "task_create"})
-        if route == "task_create":
-            return await self.create_task.handle(state)
-        if route == "update":
-            return await self.update_task.handle({**state, "current_flow": "task_update"})
-        if route == "task_update":
-            return await self.update_task.handle(state)
-        if route == "questions":
-            return await self.questions.handle(state)
-        if route == "confirmation":
-            return await self.confirmation.handle(state)
-        return await self.welcome.handle(state)
+        finally:
+            finish_latency_stage("subgraph")
 
     async def persist_session_summary(self, state: PMOAgentState) -> PMOAgentState:
+        mark_latency("memory_persist_started_at")
         summary = {
             "current_flow": state.get("current_flow") or "main_menu",
             "current_step": state.get("current_step") or "waiting_menu_selection",
@@ -179,18 +193,21 @@ class PMOMainGraphNodes:
             "update_draft": state.get("update_draft") or {},
             "pending_action_id": state.get("pending_action_id"),
         }
-        await self.memory.persist_thread(
-            tenant_id=state["tenant_id"],
-            thread_id=state["thread_id"],
-            channel=state["channel"],
-            user_id=state["user_id"],
-            user_name=state.get("user_name"),
-            current_flow=summary["current_flow"],
-            current_step=summary["current_step"],
-            state_summary=summary,
-            last_event_id=state.get("event_id"),
-        )
-        return {}
+        try:
+            await self.memory.persist_thread(
+                tenant_id=state["tenant_id"],
+                thread_id=state["thread_id"],
+                channel=state["channel"],
+                user_id=state["user_id"],
+                user_name=state.get("user_name"),
+                current_flow=summary["current_flow"],
+                current_step=summary["current_step"],
+                state_summary=summary,
+                last_event_id=state.get("event_id"),
+            )
+            return {}
+        finally:
+            finish_latency_stage("memory_persist")
 
     async def build_api_response(self, state: PMOAgentState) -> PMOAgentState:
         status = state.get("response_status") or "completed"
@@ -208,6 +225,7 @@ class PMOMainGraphNodes:
             "confirmation": state.get("confirmation"),
             "error": _error_payload(state),
         }
+        mark_latency("response_built_at")
         return {"api_response": response}
 
 

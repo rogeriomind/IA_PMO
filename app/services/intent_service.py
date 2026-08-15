@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.agent.latency import record_llm_call
 from app.config import Settings
 from app.graph.prompts import CLASSIFIER_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT
 from app.observability.llm_usage import (
@@ -61,7 +63,17 @@ class IntentService:
                     metadata={"provider": self.settings.llm_provider, "schema": "IntentClassification"},
                 )
                 with generation as observation:
-                    result = await self._classifier.ainvoke(messages)
+                    llm_started = time.perf_counter()
+                    llm_success = False
+                    try:
+                        result = await self._classifier.ainvoke(messages)
+                        llm_success = True
+                    finally:
+                        record_llm_call(
+                            name="legacy.intent.classify",
+                            duration_ms=int((time.perf_counter() - llm_started) * 1000),
+                            success=llm_success,
+                        )
                     classification = IntentClassification.model_validate(unwrap_structured_output(result))
                     self._update_observation(
                         observation,
@@ -94,7 +106,17 @@ class IntentService:
                     },
                 )
                 with generation as observation:
-                    result = await self._extractor.ainvoke(messages)
+                    llm_started = time.perf_counter()
+                    llm_success = False
+                    try:
+                        result = await self._extractor.ainvoke(messages)
+                        llm_success = True
+                    finally:
+                        record_llm_call(
+                            name="legacy.entities.extract",
+                            duration_ms=int((time.perf_counter() - llm_started) * 1000),
+                            success=llm_success,
+                        )
                     entities = TaskEntities.model_validate(unwrap_structured_output(result))
                     self._update_observation(
                         observation,

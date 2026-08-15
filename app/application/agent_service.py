@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from app.agent.errors import ThreadLockedError
+from app.agent.latency import LatencyTracker, mark_latency_once, reset_latency_tracker, set_latency_tracker
 from app.agent.main_graph.state import PMOAgentState
 from app.agent.thread_lock import ThreadLockManager
 from app.api.dependencies import RequestContext
@@ -43,6 +44,9 @@ class AgentV2Service:
             return AgentV2Response.model_validate(response_payload)
 
         start = time.perf_counter()
+        latency = LatencyTracker()
+        latency.mark("request_received_at")
+        latency_token = set_latency_tracker(latency)
         trace = self.tracer.start_trace(
             name="v2.agent.event",
             session_id=payload.thread_id,
@@ -59,37 +63,42 @@ class AgentV2Service:
             input_payload=payload.model_dump(mode="json"),
         )
         try:
-            async with self.thread_locks.acquire(tenant_id=payload.tenant_id, thread_id=payload.thread_id):
-                state = {
-                    **_state_from_payload(payload, context),
-                    "trace_id": trace.trace_id,
-                    "_trace": trace,
-                }
-                result: PMOAgentState = await self.graph.ainvoke(state)
-        except ThreadLockedError:
-            result = _conflict_state(payload)
-        except Exception as exc:
-            result = _error_state(payload, exc)
+            try:
+                async with self.thread_locks.acquire(tenant_id=payload.tenant_id, thread_id=payload.thread_id):
+                    state = {
+                        **_state_from_payload(payload, context),
+                        "trace_id": trace.trace_id,
+                        "_trace": trace,
+                    }
+                    result: PMOAgentState = await self.graph.ainvoke(state)
+            except ThreadLockedError:
+                result = _conflict_state(payload)
+            except Exception as exc:
+                result = _error_state(payload, exc)
 
-        response_payload = result.get("api_response") or _fallback_response(payload)
-        self.tracer.update_trace(trace, output=response_payload)
-        latency_ms = int((time.perf_counter() - start) * 1000)
-        self.repository.append_agent_event(
-            event_id=payload.event_id,
-            request_id=payload.request_id,
-            correlation_id=payload.correlation_id,
-            thread_id=payload.thread_id,
-            tenant_id=payload.tenant_id,
-            user_id=payload.user.id,
-            message_type=payload.message_type,
-            flow=response_payload.get("flow"),
-            step=response_payload.get("step"),
-            input_payload_sanitized=sanitize_payload(payload.model_dump(mode="json")),
-            output_payload_sanitized=sanitize_payload(response_payload),
-            status=response_payload.get("status") or "error",
-            latency_ms=latency_ms,
-        )
-        return AgentV2Response.model_validate(response_payload)
+            response_payload = result.get("api_response") or _fallback_response(payload)
+            mark_latency_once("response_built_at")
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            response_payload = _with_latency(response_payload, latency.snapshot(agent_total_ms=latency_ms))
+            self.tracer.update_trace(trace, output=response_payload)
+            self.repository.append_agent_event(
+                event_id=payload.event_id,
+                request_id=payload.request_id,
+                correlation_id=payload.correlation_id,
+                thread_id=payload.thread_id,
+                tenant_id=payload.tenant_id,
+                user_id=payload.user.id,
+                message_type=payload.message_type,
+                flow=response_payload.get("flow"),
+                step=response_payload.get("step"),
+                input_payload_sanitized=sanitize_payload(payload.model_dump(mode="json")),
+                output_payload_sanitized=sanitize_payload(response_payload),
+                status=response_payload.get("status") or "error",
+                latency_ms=latency_ms,
+            )
+            return AgentV2Response.model_validate(response_payload)
+        finally:
+            reset_latency_tracker(latency_token)
 
     async def get_thread(self, *, tenant_id: str, thread_id: str) -> AgentThreadSnapshot | None:
         thread = self.repository.get_agent_thread(tenant_id=tenant_id, thread_id=thread_id)
@@ -187,6 +196,14 @@ def _fallback_response(payload: AgentEventEnvelope) -> dict[str, Any]:
         "confirmation": None,
         "error": {"code": "MISSING_AGENT_RESPONSE", "message": "Missing graph response"},
     }
+
+
+def _with_latency(response_payload: dict[str, Any], latency: dict[str, Any]) -> dict[str, Any]:
+    response = dict(response_payload)
+    data = dict(response.get("data") or {})
+    data["latency"] = latency
+    response["data"] = data
+    return response
 
 
 def _safe_thread_summary(summary: dict[str, Any]) -> dict[str, Any]:
