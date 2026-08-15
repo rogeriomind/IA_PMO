@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.agent.extraction.schemas import CreateTaskExtraction, DateExtraction, UpdateTaskExtraction
+from app.agent.latency import record_llm_call
 from app.config import Settings
 from app.mcp.board_tools import normalize_priority
 from app.observability.llm_usage import (
@@ -89,7 +91,17 @@ class TaskExtractionService:
                     },
                 )
                 with generation as observation:
-                    result = await self._create_llm.ainvoke(messages)
+                    llm_started = time.perf_counter()
+                    llm_success = False
+                    try:
+                        result = await self._create_llm.ainvoke(messages)
+                        llm_success = True
+                    finally:
+                        record_llm_call(
+                            name="task_create.extract",
+                            duration_ms=int((time.perf_counter() - llm_started) * 1000),
+                            success=llm_success,
+                        )
                     llm = CreateTaskExtraction.model_validate(unwrap_structured_output(result))
                     self._update_observation(
                         observation,
@@ -131,7 +143,17 @@ class TaskExtractionService:
                     },
                 )
                 with generation as observation:
-                    result = await self._update_llm.ainvoke(messages)
+                    llm_started = time.perf_counter()
+                    llm_success = False
+                    try:
+                        result = await self._update_llm.ainvoke(messages)
+                        llm_success = True
+                    finally:
+                        record_llm_call(
+                            name="task_update.extract",
+                            duration_ms=int((time.perf_counter() - llm_started) * 1000),
+                            success=llm_success,
+                        )
                     llm = UpdateTaskExtraction.model_validate(unwrap_structured_output(result))
                     self._update_observation(
                         observation,

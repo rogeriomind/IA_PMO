@@ -57,8 +57,10 @@ LLM_VALIDATE_MODEL_ON_HEALTH=true
 DATABASE_URL=
 ENCRYPTION_KEY=
 MULTI_TENANT_ENABLED=true
-MCP_BOARD_URL=docker compose -f /opt/board_pmo/docker-compose.yml exec -T api node apps/api/dist/mcp/server.js
-MCP_BOARD_TRANSPORT=stdio
+MCP_BOARD_URL=http://mcp-board:8011/mcp
+MCP_BOARD_TRANSPORT=streamable_http
+MCP_PERSISTENT_SESSIONS_ENABLED=true
+MCP_SESSION_POOL_SIZE=2
 LANGFUSE_ENABLED=true
 LANGFUSE_PUBLIC_KEY=
 LANGFUSE_SECRET_KEY=
@@ -68,7 +70,14 @@ AGENT_API_PORT=8010
 
 O provedor padrao e `deepseek`. A implementacao usa `langchain-openai` porque a DeepSeek expoe um endpoint compativel com o formato OpenAI.
 
-O MCP do board documentado em `/opt/shared/mcp/board_pmo.md` usa transporte `stdio` executando o servidor dentro do container `api` do projeto `/opt/board_pmo`. Por isso o compose monta `/var/run/docker.sock` e `/opt/board_pmo` no container da API.
+Em producao, prefira `MCP_BOARD_TRANSPORT=streamable_http` apontando para um servidor MCP persistente na rede interna Docker, por exemplo `http://mcp-board:8011/mcp`. O transporte `stdio` continua disponivel para desenvolvimento, testes ou fallback controlado:
+
+```env
+MCP_BOARD_URL=docker compose -f /opt/board_pmo/docker-compose.yml exec -T api node apps/api/dist/mcp/server.js
+MCP_BOARD_TRANSPORT=stdio
+```
+
+O cliente MCP abre um pool de sessoes persistentes para `streamable_http`/`sse` no startup do FastAPI. Cada sessao e reutilizada com lock proprio para evitar chamadas concorrentes no mesmo `ClientSession`; aumente `MCP_SESSION_POOL_SIZE` somente depois de medir concorrencia real.
 
 Se `DATABASE_URL` estiver vazio, o servico usa SQLite local apenas para desenvolvimento. Em producao, use Postgres.
 
@@ -132,6 +141,17 @@ Se nao existir, crie ou ajuste o nome da rede no `docker-compose.yml`:
 ```bash
 docker network create board_pmo_default
 ```
+
+Para ativar o MCP Board persistente gerenciado por este compose, valide primeiro a imagem e o comando HTTP do PMO Board e habilite o perfil:
+
+```env
+COMPOSE_PROFILES=mcp-board
+MCP_BOARD_IMAGE=node:22-alpine
+MCP_BOARD_WORKDIR=/opt/board_pmo
+MCP_BOARD_COMMAND=node apps/api/dist/mcp/server.js --transport streamable-http --host 0.0.0.0 --port 8011 --path /mcp
+```
+
+O servico `mcp-board` usa `restart: unless-stopped`, comunica pela rede Docker interna e nao publica porta no host por padrao.
 
 ## Testar health
 

@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     mcp_tool_map_json: str = Field(default="", alias="MCP_TOOL_MAP_JSON")
     mcp_timeout_seconds: float = Field(default=15.0, alias="MCP_TIMEOUT_SECONDS")
     mcp_read_retries: int = Field(default=2, alias="MCP_READ_RETRIES")
+    mcp_persistent_sessions_enabled: bool = Field(
+        default=True,
+        alias="MCP_PERSISTENT_SESSIONS_ENABLED",
+    )
+    mcp_session_pool_size: int = Field(default=2, alias="MCP_SESSION_POOL_SIZE")
 
     agent_intent_confidence_threshold: float = Field(
         default=0.75, alias="AGENT_INTENT_CONFIDENCE_THRESHOLD"
@@ -152,6 +157,12 @@ class Settings(BaseSettings):
 
                 logging.getLogger(__name__).warning(
                     "REDIS_ENABLED=false in production; run a single API replica or enable Redis locks."
+                )
+            if self.mcp_board_transport == "stdio":
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "MCP_BOARD_TRANSPORT=stdio in production; prefer streamable_http with a persistent MCP server."
                 )
 
     @property

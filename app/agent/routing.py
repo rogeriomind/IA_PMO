@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 from app.agent.intents import AgentIntentClassification, WRITE_INTENTS
+from app.agent.latency import record_llm_call
 from app.config import Settings
 from app.observability.llm_usage import (
     chat_model_kwargs,
@@ -223,7 +225,17 @@ class HybridIntentRouter:
                 metadata={"provider": self.settings.llm_provider, "schema": "AgentIntentClassification"},
             )
             with generation as observation:
-                result = await self._llm.ainvoke(messages)
+                llm_started = time.perf_counter()
+                llm_success = False
+                try:
+                    result = await self._llm.ainvoke(messages)
+                    llm_success = True
+                finally:
+                    record_llm_call(
+                        name="agent.intent.classify",
+                        duration_ms=int((time.perf_counter() - llm_started) * 1000),
+                        success=llm_success,
+                    )
                 classification = AgentIntentClassification.model_validate(unwrap_structured_output(result))
                 self._update_observation(
                     observation,

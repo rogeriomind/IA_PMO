@@ -5,7 +5,9 @@ import json
 import logging
 import re
 import shlex
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -162,14 +164,49 @@ class BoardToolRegistry:
         return tool_name
 
 
+@dataclass
+class _SessionSlot:
+    session: Any
+    stack: AsyncExitStack
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 class MCPBoardClient:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.registry = BoardToolRegistry.from_settings(settings)
+        self._session_pool: list[_SessionSlot] = []
+        self._session_pool_lock = asyncio.Lock()
+        self._next_session_index = 0
 
     @property
     def mcp_loaded(self) -> bool:
         return self.registry.loaded and bool(self.registry.semantic_map)
+
+    async def startup(self) -> None:
+        if not self.settings.mcp_persistent_sessions_enabled:
+            return
+        if self.settings.mcp_board_transport == "stdio":
+            if self.settings.is_production:
+                logger.warning("MCP_BOARD_TRANSPORT=stdio in production; prefer streamable_http.")
+            return
+        if self.settings.mcp_board_transport not in {"http", "streamable_http", "sse"}:
+            return
+        if not self.settings.mcp_board_url:
+            logger.warning("MCP_BOARD_URL is not configured; MCP session pool was not started.")
+            return
+        await self._ensure_session_pool()
+
+    async def close(self) -> None:
+        async with self._session_pool_lock:
+            slots = list(self._session_pool)
+            self._session_pool.clear()
+            self._next_session_index = 0
+        for slot in slots:
+            try:
+                await slot.stack.aclose()
+            except Exception:
+                logger.exception("Failed to close MCP session")
 
     async def call_semantic_tool(
         self,
@@ -177,9 +214,10 @@ class MCPBoardClient:
         arguments: dict[str, Any],
         *,
         read_only: bool,
+        read_retries: int | None = None,
     ) -> Any:
         real_tool_name = self.registry.real_tool_name(internal_name)
-        retries = max(0, self.settings.mcp_read_retries) if read_only else 0
+        retries = max(0, self.settings.mcp_read_retries if read_retries is None else read_retries) if read_only else 0
 
         last_error: Exception | None = None
         for attempt in range(retries + 1):
@@ -199,12 +237,88 @@ class MCPBoardClient:
     async def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         transport = self.settings.mcp_board_transport
         if transport in {"http", "streamable_http"}:
+            if self.settings.mcp_persistent_sessions_enabled:
+                return await self._call_persistent_session(tool_name, arguments)
             return await self._call_streamable_http(tool_name, arguments)
         if transport == "sse":
+            if self.settings.mcp_persistent_sessions_enabled:
+                return await self._call_persistent_session(tool_name, arguments)
             return await self._call_sse(tool_name, arguments)
         if transport == "stdio":
             return await self._call_stdio(tool_name, arguments)
         raise ValueError(f"Unsupported MCP transport: {transport}")
+
+    async def _call_persistent_session(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        slot = await self._next_session_slot()
+        async with slot.lock:
+            result = await slot.session.call_tool(
+                tool_name,
+                arguments,
+                read_timeout_seconds=timedelta(seconds=self.settings.mcp_timeout_seconds),
+            )
+            return self._normalize_result(result)
+
+    async def _next_session_slot(self) -> _SessionSlot:
+        await self._ensure_session_pool()
+        async with self._session_pool_lock:
+            if not self._session_pool:
+                raise RuntimeError("MCP session pool is not available")
+            slot = self._session_pool[self._next_session_index % len(self._session_pool)]
+            self._next_session_index += 1
+            return slot
+
+    async def _ensure_session_pool(self) -> None:
+        async with self._session_pool_lock:
+            if self._session_pool:
+                return
+            pool_size = max(1, self.settings.mcp_session_pool_size)
+            opened: list[_SessionSlot] = []
+            try:
+                for _ in range(pool_size):
+                    opened.append(await self._open_session())
+            except Exception:
+                for slot in opened:
+                    await slot.stack.aclose()
+                raise
+            self._session_pool = opened
+
+    async def _open_session(self) -> _SessionSlot:
+        if not self.settings.mcp_board_url:
+            raise ValueError("MCP_BOARD_URL is required for persistent MCP transport")
+
+        from mcp import ClientSession
+
+        stack = AsyncExitStack()
+        try:
+            if self.settings.mcp_board_transport in {"http", "streamable_http"}:
+                try:
+                    from mcp.client.streamable_http import streamable_http_client
+                except ImportError:
+                    from mcp.client.streamable_http import streamablehttp_client as streamable_http_client
+
+                streams = await stack.enter_async_context(
+                    streamable_http_client(self.settings.mcp_board_url)
+                )
+            elif self.settings.mcp_board_transport == "sse":
+                from mcp.client.sse import sse_client
+
+                streams = await stack.enter_async_context(sse_client(self.settings.mcp_board_url))
+            else:
+                raise ValueError(f"Persistent sessions are not supported for {self.settings.mcp_board_transport}")
+
+            read_stream, write_stream, *_ = streams
+            session = await stack.enter_async_context(
+                ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(seconds=self.settings.mcp_timeout_seconds),
+                )
+            )
+            await session.initialize()
+            return _SessionSlot(session=session, stack=stack)
+        except Exception:
+            await stack.aclose()
+            raise
 
     async def _call_streamable_http(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         if not self.settings.mcp_board_url:

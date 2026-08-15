@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from app.config import Settings
+from app.observability.langfuse import sanitize_payload
 from app.schemas import PendingActionStatus
 
 
@@ -76,6 +77,8 @@ class ToolExecutionAuditModel(Base):
     tool_type: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     latency_ms: Mapped[int] = mapped_column(nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    transport: Mapped[str | None] = mapped_column(String(40))
     arguments: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     result: Mapped[Any | None] = mapped_column(JSON)
     error_code: Mapped[str | None] = mapped_column(String(80))
@@ -733,6 +736,8 @@ class PendingActionRepository:
         arguments: dict[str, Any],
         result: Any | None = None,
         error_code: str | None = None,
+        retry_count: int = 0,
+        transport: str | None = None,
     ) -> dict[str, Any]:
         record = ToolExecutionAuditModel(
             id=str(uuid4()),
@@ -746,8 +751,10 @@ class PendingActionRepository:
             tool_type=tool_type,
             status=status,
             latency_ms=latency_ms,
-            arguments=arguments,
-            result=result,
+            retry_count=retry_count,
+            transport=transport,
+            arguments=sanitize_payload(arguments),
+            result=sanitize_payload(result),
             error_code=error_code,
             created_at=utcnow(),
         )

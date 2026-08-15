@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -53,15 +54,17 @@ class StatusSubgraph:
         today = _today(state)
         project_id = (state.get("metadata") or {}).get("project_id")
         try:
-            my_tasks_result = await self.gateway.execute(
-                tool_name="board_list_my_tasks",
-                arguments={"user_id": state["user_id"], "project_id": project_id},
-                context=_context(state, intent="user.my_tasks"),
-            )
-            blockers_result = await self.gateway.execute(
-                tool_name="board_list_blockers",
-                arguments={"project_id": project_id},
-                context=_context(state, intent="project.blockers"),
+            my_tasks_result, blockers_result = await asyncio.gather(
+                self.gateway.execute(
+                    tool_name="board_list_my_tasks",
+                    arguments={"user_id": state["user_id"], "project_id": project_id},
+                    context=_context(state, intent="user.my_tasks"),
+                ),
+                self.gateway.execute(
+                    tool_name="board_list_blockers",
+                    arguments={"project_id": project_id},
+                    context=_context(state, intent="project.blockers"),
+                ),
             )
         except AgentError as exc:
             return {

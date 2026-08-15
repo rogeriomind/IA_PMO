@@ -23,6 +23,10 @@ class JsonFormatter(logging.Formatter):
             "intent",
             "tool_name",
             "latency_ms",
+            "duration_ms",
+            "retry_count",
+            "transport",
+            "success",
             "status",
             "error_code",
         ):
@@ -41,4 +45,3 @@ def configure_logging(level_name: str) -> None:
     handler.setFormatter(JsonFormatter())
     root.addHandler(handler)
     root.setLevel(getattr(logging, level_name.upper(), logging.INFO))
-

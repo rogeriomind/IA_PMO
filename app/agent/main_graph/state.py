@@ -48,6 +48,7 @@ class PMOAgentState(TypedDict, total=False):
     requires_confirmation: bool
     confirmation: dict[str, Any] | None
     api_response: dict[str, Any]
+    latency: dict[str, Any]
 
     route: str
     intent: str | None

@@ -100,18 +100,25 @@ def _extract_tasks(result: Any) -> list[dict[str, Any]]:
 
 
 class BoardTools:
-    def __init__(self, client: MCPBoardClient):
+    def __init__(self, client: MCPBoardClient, *, read_retries: int | None = None):
         self.client = client
+        self.read_retries = read_retries
 
     async def search_tasks(self, query: str, project_id: str | None = None) -> Any:
         return await self.client.call_semantic_tool(
             "search_tasks",
             drop_none({"search": query}),
             read_only=True,
+            read_retries=self.read_retries,
         )
 
     async def get_task(self, task_id: str) -> Any:
-        return await self.client.call_semantic_tool("get_task", {"id": task_id}, read_only=True)
+        return await self.client.call_semantic_tool(
+            "get_task",
+            {"id": task_id},
+            read_only=True,
+            read_retries=self.read_retries,
+        )
 
     async def create_task(self, payload: dict[str, Any], idempotency_key: str | None = None) -> Any:
         arguments = drop_none({**normalize_task_payload(payload), "idempotency_key": idempotency_key})
@@ -158,6 +165,7 @@ class BoardTools:
             "get_project_status",
             drop_none({"project_id": project_id, "query": query}),
             read_only=True,
+            read_retries=self.read_retries,
         )
 
     async def list_blockers(self, project_id: str | None = None) -> Any:
@@ -165,6 +173,7 @@ class BoardTools:
             "list_blockers",
             drop_none({"project_id": project_id}),
             read_only=True,
+            read_retries=self.read_retries,
         )
 
     async def list_my_tasks(self, user_id: str, project_id: str | None = None) -> Any:
@@ -172,6 +181,7 @@ class BoardTools:
             "list_my_tasks",
             drop_none({"user_id": user_id, "project_id": project_id}),
             read_only=True,
+            read_retries=self.read_retries,
         )
 
     async def _resolve_task_id(self, *, task_id: str | None, task_query: str | None) -> str:
