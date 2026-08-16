@@ -137,6 +137,7 @@ def _state_from_payload(payload: AgentEventEnvelope, context: RequestContext) ->
         "message_text": payload.content.text,
         "callback_data": payload.content.callback_data,
         "metadata": payload.metadata.model_dump(mode="json"),
+        "last_ui_context_id": (payload.metadata.extra or {}).get("ui_context_id"),
         "current_flow": "main_menu",
         "current_step": "new_event",
         "response_data": {},

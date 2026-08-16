@@ -45,21 +45,5 @@ services:
       - /usr/bin/docker:/usr/bin/docker:ro
     restart: unless-stopped
 
-  mcp-board:
-    image: "${MCP_BOARD_IMAGE:-node:22-alpine}"
-    profiles:
-      - mcp-board
-    working_dir: "${MCP_BOARD_WORKDIR:-/opt/board_pmo}"
-    command: "${MCP_BOARD_COMMAND:-node apps/api/dist/mcp/server.js --transport streamable-http --host 0.0.0.0 --port 8011 --path /mcp}"
-    environment:
-      MCP_BOARD_TRANSPORT: streamable_http
-      PORT: "${MCP_BOARD_PORT:-8011}"
-    expose:
-      - "${MCP_BOARD_PORT:-8011}"
-    volumes:
-      - /opt/shared/mcp:/opt/shared/mcp:ro
-      - /opt/board_pmo:/opt/board_pmo:ro
-    restart: unless-stopped
-
 volumes:
   pmo_agent_postgres:

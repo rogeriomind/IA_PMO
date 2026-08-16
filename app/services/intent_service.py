@@ -391,6 +391,15 @@ class IntentService:
             fallback_value = getattr(fallback, field_name)
             if primary_value in (None, {}, []) and fallback_value not in (None, {}, []):
                 setattr(merged, field_name, fallback_value)
+        if fallback.due_date and not IntentService._is_iso_date(merged.due_date):
+            merged.due_date = fallback.due_date
         if not merged.fields and fallback.fields:
             merged.fields = fallback.fields
+        elif fallback.fields.get("due_date") and not IntentService._is_iso_date((merged.fields or {}).get("due_date")):
+            merged.fields = dict(merged.fields or {})
+            merged.fields["due_date"] = fallback.fields.get("due_date")
         return merged
+
+    @staticmethod
+    def _is_iso_date(value: str | None) -> bool:
+        return bool(value and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value))

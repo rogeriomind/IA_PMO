@@ -68,11 +68,13 @@ class AgentUIOption(BaseModel):
     id: str
     label: str
     callback_data: str
+    row: int | None = None
 
 
 class AgentUI(BaseModel):
     type: AgentUIType = "none"
     options: list[AgentUIOption] = Field(default_factory=list)
+    context_id: str | None = None
 
 
 class AgentConfirmationPayload(BaseModel):

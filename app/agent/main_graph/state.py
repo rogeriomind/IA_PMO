@@ -31,6 +31,7 @@ class PMOAgentState(TypedDict, total=False):
     selected_task_id: str | None
     selected_task_number: int | None
     task_selection_map: dict[str, str]
+    last_ui_context_id: str | None
 
     create_draft: dict[str, Any]
     update_draft: dict[str, Any]
