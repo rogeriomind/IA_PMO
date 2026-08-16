@@ -77,6 +77,7 @@ board_list_my_tasks
 def test_tool_registry_has_only_expected_board_tools(client):
     expected = {
         "board_search_tasks",
+        "board_search_users",
         "board_get_task",
         "board_create_task",
         "board_update_task",
@@ -223,4 +224,3 @@ def test_v1_confirmation_rejects_ambiguous_approval_message(client):
     assert confirm.status_code == 200
     assert confirm.json()["status"] == "error"
     assert client.fake_tools.write_calls == []
-

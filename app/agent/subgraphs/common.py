@@ -234,7 +234,9 @@ def _canonical_assignee(task: dict[str, Any]) -> dict[str, str | None]:
             "name": _string_or_none(assignee.get("name") or assignee.get("full_name") or assignee.get("username")),
         }
     return {
-        "id": _string_or_none(task.get("assignee_id") or task.get("owner_id") or task.get("assigned_to_id")),
+        "id": _string_or_none(
+            task.get("assignee_id") or task.get("assigneeId") or task.get("owner_id") or task.get("assigned_to_id")
+        ),
         "name": _string_or_none(
             task.get("assignee_name")
             or task.get("owner_name")

@@ -67,6 +67,14 @@ def normalize_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
     if "due_date" in normalized:
         normalized["dueDate"] = normalized.pop("due_date")
+    if "assignee_id" in normalized:
+        value = normalized.pop("assignee_id")
+        if value is not None:
+            normalized["assigneeId"] = value
+    if "assignee" in normalized:
+        value = normalized.pop("assignee")
+        if value is not None:
+            normalized["assigneeId"] = value
     if "priority" in normalized:
         normalized["priority"] = normalize_priority(normalized["priority"])
     if "status" in normalized:
@@ -116,6 +124,14 @@ class BoardTools:
         return await self.client.call_semantic_tool(
             "get_task",
             {"id": task_id},
+            read_only=True,
+            read_retries=self.read_retries,
+        )
+
+    async def search_users(self, query: str | None = None, limit: int = 20) -> Any:
+        return await self.client.call_semantic_tool(
+            "search_users",
+            drop_none({"query": query, "limit": limit}),
             read_only=True,
             read_retries=self.read_retries,
         )
@@ -176,10 +192,18 @@ class BoardTools:
             read_retries=self.read_retries,
         )
 
-    async def list_my_tasks(self, user_id: str, project_id: str | None = None) -> Any:
+    async def list_my_tasks(
+        self,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        assignee_id: str | None = None,
+        assignee_email: str | None = None,
+    ) -> Any:
+        if not assignee_id and user_id and _looks_like_uuid(user_id):
+            assignee_id = user_id
         return await self.client.call_semantic_tool(
             "list_my_tasks",
-            drop_none({"user_id": user_id, "project_id": project_id}),
+            drop_none({"assigneeId": assignee_id, "assigneeEmail": assignee_email, "project_id": project_id}),
             read_only=True,
             read_retries=self.read_retries,
         )
@@ -214,3 +238,12 @@ class BoardTools:
                 return resolved_id
 
         raise ValueError(f"Encontrei mais de uma tarefa para '{task_query}'. Informe o id da tarefa.")
+
+
+def _looks_like_uuid(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            value.strip(),
+        )
+    )

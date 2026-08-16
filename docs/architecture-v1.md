@@ -52,6 +52,7 @@ flowchart TD
 Tools registradas:
 
 - `board_search_tasks`: leitura, `board.read`.
+- `board_search_users`: leitura, `board.read`.
 - `board_get_task`: leitura, `board.read`.
 - `board_get_project_status`: leitura, `board.read`.
 - `board_list_blockers`: leitura, `board.read`.
@@ -94,4 +95,3 @@ Depois de confirmada a escrita, a API tenta `board_get_task` quando ha identific
 - O arquivo `/opt/shared/mcp/board_pmo.md` nao estava disponivel neste ambiente local. A implementacao usa a allowlist central exigida e mantem a leitura dinamica antiga para producao.
 - Checkpointer PostgreSQL nativo do LangGraph nao foi ativado porque a infraestrutura/migracao dedicada nao existe no repositorio. A retomada operacional foi implementada via pending actions persistidas.
 - O lock por `tenant_id + thread_id` e em memoria. Redis pode substituir essa camada quando existir na stack.
-

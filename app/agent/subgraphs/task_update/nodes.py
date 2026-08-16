@@ -57,6 +57,10 @@ class UpdateTaskSubgraph:
             return await self._list_tasks(state)
         if callback.startswith("update:page:"):
             return await self._list_tasks(state, page=first_int(callback) or 1)
+        if callback.startswith("update:assignee:"):
+            return await self._select_assignee(state, callback.removeprefix("update:assignee:"))
+        if callback == "update:skip_assignee":
+            return await self._skip_assignee_update(state)
         if callback == "update:enter_task_id":
             return {
                 "current_flow": "task_update",
@@ -117,10 +121,11 @@ class UpdateTaskSubgraph:
 
     async def _list_tasks(self, state: PMOAgentState, *, page: int = 1) -> PMOAgentState:
         project_id = (state.get("metadata") or {}).get("project_id")
+        arguments = await self._my_tasks_arguments(state, project_id=project_id)
         try:
             result = await self.gateway.execute(
                 tool_name="board_list_my_tasks",
-                arguments={"user_id": state["user_id"], "project_id": project_id},
+                arguments=arguments,
                 context=_context(state, intent="user.my_tasks"),
             )
         except AgentError as exc:
@@ -184,6 +189,18 @@ class UpdateTaskSubgraph:
             "response_status": "waiting_user_input",
             "response_data": {"tasks_count": len(tasks), "page": page},
         }
+
+    async def _my_tasks_arguments(self, state: PMOAgentState, *, project_id: str | None) -> dict[str, Any]:
+        resolution = await self.assignees.resolve_current_user(
+            tenant_id=state["tenant_id"],
+            channel=state["channel"],
+            provider_user_id=state["user_id"],
+            current_user_name=state.get("user_name"),
+            current_username=state.get("username"),
+        )
+        if resolution.status == "resolved" and resolution.assignee_id:
+            return {"assigneeId": resolution.assignee_id, "project_id": project_id}
+        return {"user_id": state["user_id"], "project_id": project_id}
 
     async def _resolve_task_from_text(self, state: PMOAgentState, text: str) -> PMOAgentState:
         if text.isdigit():
@@ -327,30 +344,42 @@ class UpdateTaskSubgraph:
         )
         fields = dict(extraction.fields or {})
         comment = extraction.comment
-        unresolved_assignee_message = None
+        assignee_display_name = None
         if extraction.assignee_name:
             resolution = await self.assignees.resolve(
                 assignee_name=extraction.assignee_name,
+                tenant_id=state["tenant_id"],
+                channel=state["channel"],
+                provider_user_id=state["user_id"],
                 current_user_id=state["user_id"],
                 current_user_name=state.get("user_name"),
+                current_username=state.get("username"),
             )
             if resolution.status == "resolved" and resolution.assignee_id:
-                fields["assignee_id"] = resolution.assignee_id
+                fields["assigneeId"] = resolution.assignee_id
+                assignee_display_name = resolution.display_name
             else:
                 fields.pop("assignee", None)
-                unresolved_assignee_message = (
-                    "N\u00e3o h\u00e1 uma resolu\u00e7\u00e3o segura para esse respons\u00e1vel neste ambiente."
+                current_task = await self._load_current_task(state, selected_task_id)
+                await self._save_pending_assignee_selection(
+                    state,
+                    selected_task_id=selected_task_id,
+                    current_task=current_task,
+                    fields=fields,
+                    comment=comment,
+                    assignee_name=extraction.assignee_name,
+                    options=resolution.options or [],
                 )
+                return _ask_assignee_selection(extraction.assignee_name, resolution.options or [])
 
-        allowed_fields = {key: value for key, value in fields.items() if key in {"due_date", "assignee_id"} and value}
+        allowed_fields = {key: value for key, value in fields.items() if key in {"due_date", "assigneeId"} and value}
         if not allowed_fields and not comment:
             return {
                 "current_flow": "task_update",
                 "current_step": "waiting_update_fields",
                 "selected_task_id": selected_task_id,
                 "final_message": (
-                    unresolved_assignee_message
-                    or "O que voc\u00ea deseja alterar? Posso atualizar data, respons\u00e1vel ou adicionar coment\u00e1rio."
+                    "O que voc\u00ea deseja alterar? Posso atualizar data, respons\u00e1vel ou adicionar coment\u00e1rio."
                 ),
                 "response_ui": inline_keyboard(
                     [{"id": "global_menu", "label": "Voltar ao menu", "callback_data": "global:menu"}]
@@ -360,6 +389,25 @@ class UpdateTaskSubgraph:
             }
 
         current_task = await self._load_current_task(state, selected_task_id)
+        return await self._build_confirmation(
+            state,
+            selected_task_id=selected_task_id,
+            current_task=current_task,
+            allowed_fields=allowed_fields,
+            comment=comment,
+            assignee_display_name=assignee_display_name,
+        )
+
+    async def _build_confirmation(
+        self,
+        state: PMOAgentState,
+        *,
+        selected_task_id: str,
+        current_task: dict[str, Any],
+        allowed_fields: dict[str, Any],
+        comment: str | None,
+        assignee_display_name: str | None = None,
+    ) -> PMOAgentState:
         operations: list[dict[str, Any]] = []
         if allowed_fields:
             operations.append(
@@ -383,7 +431,7 @@ class UpdateTaskSubgraph:
             "current_task": current_task,
             "fields": allowed_fields,
             "comment": comment,
-            "unresolved_assignee": unresolved_assignee_message,
+            "assignee_display_name": assignee_display_name,
         }
         pending = self.repository.create_v2_pending_action(
             tenant_id=state["tenant_id"],
@@ -428,6 +476,114 @@ class UpdateTaskSubgraph:
             "response_data": {"pending_action_id": pending["id"], "operations_count": len(operations)},
         }
 
+    async def _save_pending_assignee_selection(
+        self,
+        state: PMOAgentState,
+        *,
+        selected_task_id: str,
+        current_task: dict[str, Any],
+        fields: dict[str, Any],
+        comment: str | None,
+        assignee_name: str,
+        options: list[dict[str, str | None]],
+    ) -> None:
+        await self.drafts.save(
+            tenant_id=state["tenant_id"],
+            thread_id=state["thread_id"],
+            user_id=state["user_id"],
+            draft_type="task_update",
+            payload={
+                "selected_task_id": selected_task_id,
+                "current_task": current_task,
+                "pending_update": {
+                    "fields": fields,
+                    "comment": comment,
+                    "assignee_name": assignee_name,
+                    "assignee_options": options,
+                },
+            },
+        )
+
+    async def _select_assignee(self, state: PMOAgentState, selected_user_id: str) -> PMOAgentState:
+        draft_record = await self.drafts.get(
+            tenant_id=state["tenant_id"],
+            thread_id=state["thread_id"],
+            user_id=state["user_id"],
+            draft_type="task_update",
+        )
+        payload = (draft_record or {}).get("payload") or {}
+        pending_update = payload.get("pending_update") or {}
+        user = _find_assignee_option(pending_update, selected_user_id)
+        selected_task_id = payload.get("selected_task_id") or state.get("selected_task_id")
+        if not user or not selected_task_id:
+            return {
+                "current_flow": "task_update",
+                "current_step": "waiting_update_fields",
+                "selected_task_id": selected_task_id,
+                "final_message": "Nao encontrei essa opcao de responsavel. Envie o nome ou e-mail novamente.",
+                "response_ui": inline_keyboard(
+                    [{"id": "global_menu", "label": "Voltar ao menu", "callback_data": "global:menu"}]
+                ),
+                "response_status": "validation_error",
+                "error_code": "ASSIGNEE_SELECTION_NOT_FOUND",
+            }
+        self.assignees.link_if_current_user(
+            tenant_id=state["tenant_id"],
+            channel=state["channel"],
+            provider_user_id=state["user_id"],
+            user=user,
+            current_user_name=state.get("user_name"),
+            current_username=state.get("username"),
+            source="explicit_assignee_selection",
+        )
+        fields = dict(pending_update.get("fields") or {})
+        fields.pop("assignee", None)
+        fields["assigneeId"] = user["id"]
+        allowed_fields = {key: value for key, value in fields.items() if key in {"due_date", "assigneeId"} and value}
+        current_task = payload.get("current_task") or await self._load_current_task(state, selected_task_id)
+        return await self._build_confirmation(
+            state,
+            selected_task_id=selected_task_id,
+            current_task=current_task,
+            allowed_fields=allowed_fields,
+            comment=pending_update.get("comment"),
+            assignee_display_name=user.get("name") or user.get("email") or user.get("id"),
+        )
+
+    async def _skip_assignee_update(self, state: PMOAgentState) -> PMOAgentState:
+        draft_record = await self.drafts.get(
+            tenant_id=state["tenant_id"],
+            thread_id=state["thread_id"],
+            user_id=state["user_id"],
+            draft_type="task_update",
+        )
+        payload = (draft_record or {}).get("payload") or {}
+        pending_update = payload.get("pending_update") or {}
+        selected_task_id = payload.get("selected_task_id") or state.get("selected_task_id")
+        fields = dict(pending_update.get("fields") or {})
+        fields.pop("assignee", None)
+        allowed_fields = {key: value for key, value in fields.items() if key in {"due_date", "assigneeId"} and value}
+        comment = pending_update.get("comment")
+        if not selected_task_id or (not allowed_fields and not comment):
+            return {
+                "current_flow": "task_update",
+                "current_step": "waiting_update_fields",
+                "selected_task_id": selected_task_id,
+                "final_message": "Sem o responsavel, nao sobrou nenhuma alteracao para confirmar. Envie a alteracao novamente.",
+                "response_ui": inline_keyboard(
+                    [{"id": "global_menu", "label": "Voltar ao menu", "callback_data": "global:menu"}]
+                ),
+                "response_status": "waiting_user_input",
+            }
+        current_task = payload.get("current_task") or await self._load_current_task(state, selected_task_id)
+        return await self._build_confirmation(
+            state,
+            selected_task_id=selected_task_id,
+            current_task=current_task,
+            allowed_fields=allowed_fields,
+            comment=comment,
+        )
+
     async def _load_current_task(self, state: PMOAgentState, selected_task_id: str) -> dict[str, Any]:
         try:
             task = await self.gateway.execute(
@@ -461,13 +617,61 @@ def _preview_message(preview: dict[str, Any]) -> str:
     if "due_date" in fields:
         lines.append(f"Data atual: {format_date_br(task_due_date(task))}")
         lines.append(f"Nova data: {format_date_br(fields['due_date'])}")
-    if "assignee_id" in fields:
+    if "assigneeId" in fields:
         current_assignee = task_assignee_name(task)
         lines.append(f"Responsavel atual: {current_assignee}")
-        lines.append(f"Novo responsavel: {fields['assignee_id']}")
+        lines.append(f"Novo responsavel: {preview.get('assignee_display_name') or fields['assigneeId']}")
     if preview.get("comment"):
         lines.append(f"Coment\u00e1rio: {preview['comment']}")
-    if preview.get("unresolved_assignee"):
-        lines.extend(["", preview["unresolved_assignee"], "Essa parte n\u00e3o ser\u00e1 executada."])
     lines.extend(["", "Confirma a atualiza\u00e7\u00e3o?"])
     return "\n".join(lines)
+
+
+def _ask_assignee_selection(assignee_name: str, options: list[dict[str, str | None]]) -> PMOAgentState:
+    buttons = [
+        {
+            "id": f"update_assignee_{index}",
+            "label": _assignee_label(user),
+            "callback_data": f"update:assignee:{user['id']}",
+            "row": index,
+        }
+        for index, user in enumerate(options, start=1)
+        if user.get("id")
+    ]
+    row = len(buttons) + 1
+    buttons.extend(
+        [
+            {
+                "id": "update_skip_assignee",
+                "label": "Continuar sem alterar responsavel",
+                "callback_data": "update:skip_assignee",
+                "row": row,
+            },
+            {"id": "global_menu", "label": "Voltar ao menu", "callback_data": "global:menu", "row": row},
+        ]
+    )
+    detail = "Escolha uma das opcoes abaixo." if options else "Envie outro nome ou e-mail de usuario cadastrado no Board."
+    return {
+        "current_flow": "task_update",
+        "current_step": "waiting_update_assignee_selection",
+        "final_message": f"Nao consegui vincular com seguranca o responsavel \"{assignee_name}\".\n\n{detail}",
+        "response_ui": inline_keyboard(buttons),
+        "response_status": "waiting_user_input",
+        "response_data": {"assignee_options_count": len(options)},
+    }
+
+
+def _find_assignee_option(
+    pending_update: dict[str, Any],
+    selected_user_id: str,
+) -> dict[str, str | None] | None:
+    for user in pending_update.get("assignee_options") or []:
+        if str(user.get("id")) == selected_user_id:
+            return user
+    return None
+
+
+def _assignee_label(user: dict[str, str | None]) -> str:
+    name = user.get("name") or "Usuario"
+    email = user.get("email")
+    return f"{name} ({email})" if email else name

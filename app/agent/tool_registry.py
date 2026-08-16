@@ -24,10 +24,16 @@ class GetTaskInput(StrictToolInput):
     task_id: str | None = None
 
 
+class SearchUsersInput(StrictToolInput):
+    query: str | None = None
+    limit: int | None = None
+
+
 class CreateTaskInput(StrictToolInput):
     title: str = Field(min_length=1)
     description: str | None = None
     assignee: str | None = None
+    assigneeId: str | None = None
     priority: str | None = None
     due_date: str | None = None
     dueDate: str | None = None
@@ -67,7 +73,9 @@ class ListBlockersInput(StrictToolInput):
 
 
 class ListMyTasksInput(StrictToolInput):
-    user_id: str = Field(min_length=1)
+    user_id: str | None = None
+    assigneeId: str | None = None
+    assigneeEmail: str | None = None
     project_id: str | None = None
 
 
@@ -132,6 +140,18 @@ class ToolRegistry:
                 required_permissions={"board.read"},
                 mcp_tool_name="board_get_task",
                 allowed_intents={"task.get"},
+            ),
+            "board_search_users": ToolSpec(
+                name="board_search_users",
+                description="Search board users by name or email.",
+                type="read",
+                input_model=SearchUsersInput,
+                timeout_seconds=read_timeout_seconds,
+                retry_policy=read_retry,
+                requires_confirmation=False,
+                required_permissions={"board.read"},
+                mcp_tool_name="board_search_users",
+                allowed_intents={"user.search", "assignee.resolve"},
             ),
             "board_create_task": ToolSpec(
                 name="board_create_task",
@@ -230,4 +250,3 @@ class ToolRegistry:
 
     def names(self) -> set[str]:
         return set(self._tools)
-

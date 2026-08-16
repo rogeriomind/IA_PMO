@@ -189,13 +189,14 @@ def create_app(
         selection_service = TaskSelectionService(repository, app_settings)
         draft_service = DraftService(repository, app_settings)
         extraction_service = TaskExtractionService(app_settings, tracer=tracer)
-        assignee_resolver = AssigneeResolver()
+        assignee_resolver = AssigneeResolver(board_tools=board_tools, repository=repository)
         v2_confirmation_service = AgentV2ConfirmationService(repository, gateway)
         welcome_subgraph = WelcomeMenuSubgraph()
         status_subgraph = StatusSubgraph(
             gateway=gateway,
             selections=selection_service,
             settings=app_settings,
+            assignees=assignee_resolver,
         )
         create_subgraph = CreateTaskSubgraph(
             extractor=extraction_service,

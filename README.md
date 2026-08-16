@@ -249,7 +249,7 @@ A arquitetura v1 adiciona:
 - orquestrador LangGraph principal;
 - subgrafos de tarefas e projetos;
 - roteamento hibrido deterministico + LLM;
-- registry central com as nove tools MCP permitidas;
+- registry central com as dez tools MCP permitidas;
 - `MCPGateway` com validacao de schema, allowlist, autorizacao, retry de leitura, idempotencia de escrita e auditoria;
 - confirmacao humana antes de escrita;
 - retomada por `thread_id` usando pending actions persistidas;

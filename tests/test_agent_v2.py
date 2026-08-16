@@ -11,6 +11,9 @@ from app.config import Settings
 from app.main import create_app
 
 
+ROGERIO_ID = "9b0dcbc7-e1d9-4c68-8de5-7a314b6d6c8f"
+
+
 class FakeBoardToolsV2:
     def __init__(self):
         today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
@@ -38,6 +41,10 @@ class FakeBoardToolsV2:
             },
         }
         self.write_calls = []
+        self.users = [
+            {"id": ROGERIO_ID, "name": "Rogerio", "email": "rogerio@pmo.local", "avatarUrl": None},
+            {"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "name": "Ana", "email": "ana@pmo.local", "avatarUrl": None},
+        ]
 
     async def search_tasks(self, query: str, project_id: str | None = None):
         return [task for task in self.tasks.values() if query.casefold() in task["title"].casefold()]
@@ -52,7 +59,25 @@ class FakeBoardToolsV2:
     async def list_blockers(self, project_id: str | None = None):
         return [self.tasks["TASK-BLOCK"]]
 
-    async def list_my_tasks(self, user_id: str, project_id: str | None = None):
+    async def search_users(self, query: str | None = None, limit: int = 20):
+        if not query:
+            return {"users": self.users[:limit]}
+        normalized = query.casefold().replace("é", "e")
+        return {
+            "users": [
+                user
+                for user in self.users
+                if normalized in user["name"].casefold() or normalized in user["email"].casefold()
+            ][:limit]
+        }
+
+    async def list_my_tasks(
+        self,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        assignee_id: str | None = None,
+        assignee_email: str | None = None,
+    ):
         return list(self.tasks.values())
 
     async def create_task(self, payload, idempotency_key=None):
@@ -82,6 +107,7 @@ def client(tmp_path: Path):
     doc_path.write_text(
         """
 board_search_tasks
+board_search_users
 board_get_task
 board_create_task
 board_update_task
@@ -95,6 +121,8 @@ board_list_my_tasks
     )
     settings = Settings(
         ai_provider="deepseek",
+        DEEPSEEK_API_KEY="",
+        DEEPSEEK_MODEL="",
         deepseek_model="",
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         mcp_board_doc_path=str(doc_path),
@@ -282,6 +310,33 @@ def test_v2_create_extracts_fields_requires_confirmation_and_replays_event(clien
     ).json()
     assert confirm["status"] == "completed"
     assert client.fake_tools.write_calls[0][0] == "create"
+
+
+def test_v2_create_resolves_assignee_to_board_uuid(client):
+    create = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event(
+            "create-assignee-1",
+            "text",
+            text="Criar atividade Testar o board para hoje, responsavel Rogerio.",
+        ),
+    ).json()
+
+    assert create["status"] == "awaiting_confirmation"
+    assert "Responsável: Rogerio" in create["message"]
+
+    confirmation_id = create["confirmation"]["id"]
+    confirm = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("create-assignee-2", "confirmation", callback_data=f"confirmation:approve:{confirmation_id}"),
+    ).json()
+
+    assert confirm["status"] == "completed"
+    _, payload, _ = client.fake_tools.write_calls[-1]
+    assert payload["assigneeId"] == ROGERIO_ID
+    assert payload["assigneeId"] != "u1"
 
 
 def test_v2_confirmation_uses_default_roles_when_header_is_missing(client):

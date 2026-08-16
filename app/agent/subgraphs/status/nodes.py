@@ -24,15 +24,24 @@ from app.agent.subgraphs.common import (
     task_priority,
     task_title,
 )
+from app.application.assignee_resolver import AssigneeResolver
 from app.application.task_selection_service import TaskSelectionService
 from app.config import Settings
 
 
 class StatusSubgraph:
-    def __init__(self, *, gateway: MCPGateway, selections: TaskSelectionService, settings: Settings):
+    def __init__(
+        self,
+        *,
+        gateway: MCPGateway,
+        selections: TaskSelectionService,
+        settings: Settings,
+        assignees: AssigneeResolver | None = None,
+    ):
         self.gateway = gateway
         self.selections = selections
         self.settings = settings
+        self.assignees = assignees
 
     async def handle(self, state: PMOAgentState) -> PMOAgentState:
         callback = state.get("callback_data") or ""
@@ -53,11 +62,12 @@ class StatusSubgraph:
     async def _show_status_list(self, state: PMOAgentState, *, notice: str | None = None) -> PMOAgentState:
         today = _today(state)
         project_id = (state.get("metadata") or {}).get("project_id")
+        my_tasks_arguments = await self._my_tasks_arguments(state, project_id=project_id)
         try:
             my_tasks_result, blockers_result = await asyncio.gather(
                 self.gateway.execute(
                     tool_name="board_list_my_tasks",
-                    arguments={"user_id": state["user_id"], "project_id": project_id},
+                    arguments=my_tasks_arguments,
                     context=_context(state, intent="user.my_tasks"),
                 ),
                 self.gateway.execute(
@@ -280,6 +290,19 @@ class StatusSubgraph:
             ),
             "response_status": "waiting_user_input",
         }
+
+    async def _my_tasks_arguments(self, state: PMOAgentState, *, project_id: str | None) -> dict[str, Any]:
+        if self.assignees:
+            resolution = await self.assignees.resolve_current_user(
+                tenant_id=state["tenant_id"],
+                channel=state["channel"],
+                provider_user_id=state["user_id"],
+                current_user_name=state.get("user_name"),
+                current_username=state.get("username"),
+            )
+            if resolution.status == "resolved" and resolution.assignee_id:
+                return {"assigneeId": resolution.assignee_id, "project_id": project_id}
+        return {"user_id": state["user_id"], "project_id": project_id}
 
     def _ask_task_to_update(self) -> PMOAgentState:
         return {

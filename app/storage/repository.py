@@ -104,6 +104,29 @@ class AgentThreadModel(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class AgentUserIdentityLinkModel(Base):
+    __tablename__ = "agent_user_identity_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "channel",
+            "provider_user_id",
+            name="uq_agent_user_identity_link_provider",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    channel: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    provider_user_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    board_user_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    board_user_name: Mapped[str | None] = mapped_column(String(255))
+    board_user_email: Mapped[str | None] = mapped_column(String(255))
+    source: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AgentTaskSelectionMapModel(Base):
     __tablename__ = "agent_task_selection_maps"
     __table_args__ = (
@@ -430,6 +453,67 @@ class PendingActionRepository:
             session.query(AgentDraftModel).filter_by(tenant_id=tenant_id, thread_id=thread_id).delete()
             session.query(AgentTaskSelectionMapModel).filter_by(tenant_id=tenant_id, thread_id=thread_id).delete()
             session.commit()
+
+    def get_user_identity_link(
+        self,
+        *,
+        tenant_id: str,
+        channel: str,
+        provider_user_id: str,
+    ) -> dict[str, Any] | None:
+        with self.SessionLocal() as session:
+            record = session.scalar(
+                select(AgentUserIdentityLinkModel).where(
+                    AgentUserIdentityLinkModel.tenant_id == tenant_id,
+                    AgentUserIdentityLinkModel.channel == channel,
+                    AgentUserIdentityLinkModel.provider_user_id == provider_user_id,
+                )
+            )
+            return self._identity_link_to_dict(record) if record else None
+
+    def upsert_user_identity_link(
+        self,
+        *,
+        tenant_id: str,
+        channel: str,
+        provider_user_id: str,
+        board_user_id: str,
+        board_user_name: str | None,
+        board_user_email: str | None,
+        source: str,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        with self.SessionLocal() as session:
+            record = session.scalar(
+                select(AgentUserIdentityLinkModel).where(
+                    AgentUserIdentityLinkModel.tenant_id == tenant_id,
+                    AgentUserIdentityLinkModel.channel == channel,
+                    AgentUserIdentityLinkModel.provider_user_id == provider_user_id,
+                )
+            )
+            if not record:
+                record = AgentUserIdentityLinkModel(
+                    id=str(uuid4()),
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    provider_user_id=provider_user_id,
+                    board_user_id=board_user_id,
+                    board_user_name=board_user_name,
+                    board_user_email=board_user_email,
+                    source=source,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(record)
+            else:
+                record.board_user_id = board_user_id
+                record.board_user_name = board_user_name
+                record.board_user_email = board_user_email
+                record.source = source
+                record.updated_at = now
+            session.commit()
+            session.refresh(record)
+            return self._identity_link_to_dict(record)
 
     def replace_task_selection_map(
         self,
@@ -879,6 +963,21 @@ class PendingActionRepository:
             "created_at": record.created_at.isoformat() if record.created_at else None,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
             "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+        }
+
+    @staticmethod
+    def _identity_link_to_dict(record: AgentUserIdentityLinkModel) -> dict[str, Any]:
+        return {
+            "id": record.id,
+            "tenant_id": record.tenant_id,
+            "channel": record.channel,
+            "provider_user_id": record.provider_user_id,
+            "board_user_id": record.board_user_id,
+            "board_user_name": record.board_user_name,
+            "board_user_email": record.board_user_email,
+            "source": record.source,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         }
 
     @staticmethod

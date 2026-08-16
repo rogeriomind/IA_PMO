@@ -50,7 +50,7 @@ A v2 reaproveita o gateway existente:
 
 Tools permitidas seguem restritas a:
 
-`board_search_tasks`, `board_get_task`, `board_create_task`, `board_update_task`, `board_move_task`, `board_add_comment`, `board_get_project_status`, `board_list_blockers`, `board_list_my_tasks`.
+`board_search_tasks`, `board_search_users`, `board_get_task`, `board_create_task`, `board_update_task`, `board_move_task`, `board_add_comment`, `board_get_project_status`, `board_list_blockers`, `board_list_my_tasks`.
 
 ## Seguranca
 

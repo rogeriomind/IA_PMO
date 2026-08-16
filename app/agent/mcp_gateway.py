@@ -58,6 +58,11 @@ class BoardToolsExecutor:
         if tool_name == "board_get_task":
             task_id = arguments.get("id") or arguments.get("task_id")
             return await self.board_tools.get_task(task_id=task_id)
+        if tool_name == "board_search_users":
+            return await self.board_tools.search_users(
+                query=arguments.get("query"),
+                limit=arguments.get("limit") or 20,
+            )
         if tool_name == "board_create_task":
             return await self.board_tools.create_task(arguments, idempotency_key=idempotency_key)
         if tool_name == "board_update_task":
@@ -89,10 +94,18 @@ class BoardToolsExecutor:
         if tool_name == "board_list_blockers":
             return await self.board_tools.list_blockers(project_id=arguments.get("project_id"))
         if tool_name == "board_list_my_tasks":
-            return await self.board_tools.list_my_tasks(
-                user_id=arguments["user_id"],
-                project_id=arguments.get("project_id"),
-            )
+            try:
+                return await self.board_tools.list_my_tasks(
+                    user_id=arguments.get("user_id"),
+                    project_id=arguments.get("project_id"),
+                    assignee_id=arguments.get("assigneeId"),
+                    assignee_email=arguments.get("assigneeEmail"),
+                )
+            except TypeError:
+                return await self.board_tools.list_my_tasks(
+                    user_id=arguments.get("user_id") or arguments.get("assigneeId") or "",
+                    project_id=arguments.get("project_id"),
+                )
         raise ToolNotAllowedError(f"Unknown board tool: {tool_name}")
 
 

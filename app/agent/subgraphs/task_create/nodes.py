@@ -6,7 +6,7 @@ from typing import Any
 from app.agent.extraction.extractor import TaskExtractionService
 from app.agent.main_graph.state import PMOAgentState
 from app.agent.subgraphs.common import confirmation_ui, format_date_br, inline_keyboard, priority_label
-from app.application.assignee_resolver import AssigneeResolver
+from app.application.assignee_resolver import AssigneeResolution, AssigneeResolver
 from app.application.draft_service import DraftService
 from app.config import Settings
 from app.storage.repository import PendingActionRepository, utcnow
@@ -29,9 +29,8 @@ class CreateTaskSubgraph:
         self.settings = settings
 
     async def handle(self, state: PMOAgentState) -> PMOAgentState:
+        callback = state.get("callback_data") or ""
         text = (state.get("message_text") or "").strip()
-        if not text:
-            return await self._ask_initial(state)
 
         draft_record = await self.drafts.get(
             tenant_id=state["tenant_id"],
@@ -41,6 +40,17 @@ class CreateTaskSubgraph:
         )
         draft = dict((draft_record or {}).get("payload") or state.get("create_draft") or {})
         step = state.get("current_step")
+
+        if callback.startswith("create:assignee:"):
+            return await self._select_assignee(state, draft, callback.removeprefix("create:assignee:"))
+        if callback == "create:skip_assignee":
+            for key in ("assignee_id", "assignee_name", "assignee_email", "assignee_options"):
+                draft.pop(key, None)
+            await self._save_draft(state, draft)
+            return await self._preview_and_confirm(state, draft)
+
+        if not text:
+            return await self._ask_initial(state)
 
         if step == "waiting_create_title" and not _looks_like_date_only(text):
             draft["title"] = text
@@ -53,6 +63,11 @@ class CreateTaskSubgraph:
                 draft["due_date"] = extracted_date.due_date
             else:
                 draft["due_date_text"] = text
+        elif step == "waiting_create_assignee_selection":
+            draft["assignee_name"] = text
+            draft.pop("assignee_id", None)
+            draft.pop("assignee_email", None)
+            draft.pop("assignee_options", None)
         else:
             extraction = await self.extractor.extract_create(
                 text,
@@ -115,11 +130,28 @@ class CreateTaskSubgraph:
         }
 
     async def _preview_and_confirm(self, state: PMOAgentState, draft: dict[str, Any]) -> PMOAgentState:
-        assignee_resolution = await self.assignees.resolve(
-            assignee_name=draft.get("assignee_name"),
-            current_user_id=state["user_id"],
-            current_user_name=state.get("user_name"),
-        )
+        if draft.get("assignee_id"):
+            assignee_resolution = AssigneeResolution(
+                status="resolved",
+                assignee_id=draft.get("assignee_id"),
+                display_name=draft.get("assignee_name"),
+                email=draft.get("assignee_email"),
+            )
+        else:
+            assignee_resolution = await self.assignees.resolve(
+                assignee_name=draft.get("assignee_name"),
+                tenant_id=state["tenant_id"],
+                channel=state["channel"],
+                provider_user_id=state["user_id"],
+                current_user_id=state["user_id"],
+                current_user_name=state.get("user_name"),
+                current_username=state.get("username"),
+            )
+        if assignee_resolution.status in {"needs_selection", "unavailable"} and draft.get("assignee_name"):
+            draft["assignee_options"] = assignee_resolution.options or []
+            await self._save_draft(state, draft)
+            return _ask_assignee_selection(draft, assignee_resolution)
+
         payload = {
             "title": draft["title"],
             "due_date": draft["due_date"],
@@ -128,13 +160,15 @@ class CreateTaskSubgraph:
             "project_id": draft.get("project_id"),
         }
         if assignee_resolution.status == "resolved" and assignee_resolution.assignee_id:
-            payload["assignee"] = assignee_resolution.assignee_id
+            payload["assigneeId"] = assignee_resolution.assignee_id
 
         payload = {key: value for key, value in payload.items() if value not in (None, "", {}, [])}
         preview = {
             "title": draft["title"],
             "due_date": draft["due_date"],
             "assignee_name": assignee_resolution.display_name or draft.get("assignee_name"),
+            "assignee_id": assignee_resolution.assignee_id,
+            "assignee_email": assignee_resolution.email,
             "assignee_status": assignee_resolution.status,
             "priority": draft.get("priority"),
             "description": draft.get("description"),
@@ -162,11 +196,6 @@ class CreateTaskSubgraph:
         )
         await self._save_draft(state, draft)
         message = _preview_message(preview)
-        if assignee_resolution.status == "unavailable" and draft.get("assignee_name"):
-            message += (
-                "\n\nN\u00e3o encontrei uma resolu\u00e7\u00e3o segura para esse respons\u00e1vel; "
-                "a atividade ser\u00e1 criada sem respons\u00e1vel."
-            )
         return {
             "current_flow": "confirmation",
             "current_step": "awaiting_confirmation",
@@ -188,6 +217,41 @@ class CreateTaskSubgraph:
             "response_data": {"pending_action_id": pending["id"]},
         }
 
+    async def _select_assignee(
+        self,
+        state: PMOAgentState,
+        draft: dict[str, Any],
+        selected_user_id: str,
+    ) -> PMOAgentState:
+        user = _find_assignee_option(draft, selected_user_id)
+        if not user:
+            return {
+                "current_flow": "task_create",
+                "current_step": "waiting_create_assignee_selection",
+                "create_draft": draft,
+                "final_message": "Nao encontrei essa opcao de responsavel. Envie o nome ou e-mail novamente.",
+                "response_ui": inline_keyboard(
+                    [{"id": "global_menu", "label": "Voltar ao menu", "callback_data": "global:menu"}]
+                ),
+                "response_status": "validation_error",
+                "error_code": "ASSIGNEE_SELECTION_NOT_FOUND",
+            }
+        self.assignees.link_if_current_user(
+            tenant_id=state["tenant_id"],
+            channel=state["channel"],
+            provider_user_id=state["user_id"],
+            user=user,
+            current_user_name=state.get("user_name"),
+            current_username=state.get("username"),
+            source="explicit_assignee_selection",
+        )
+        draft["assignee_id"] = user["id"]
+        draft["assignee_name"] = user.get("name") or user.get("email") or user["id"]
+        draft["assignee_email"] = user.get("email")
+        draft.pop("assignee_options", None)
+        await self._save_draft(state, draft)
+        return await self._preview_and_confirm(state, draft)
+
     async def _save_draft(self, state: PMOAgentState, draft: dict[str, Any]) -> None:
         await self.drafts.save(
             tenant_id=state["tenant_id"],
@@ -208,6 +272,60 @@ def _merge_draft(draft: dict[str, Any], extracted: dict[str, Any]) -> dict[str, 
 
 def _looks_like_date_only(text: str) -> bool:
     return any(part in text.casefold() for part in ("hoje", "amanh", "segunda", "ter", "quarta", "quinta", "sexta")) or "/" in text
+
+
+def _ask_assignee_selection(draft: dict[str, Any], resolution: AssigneeResolution) -> PMOAgentState:
+    options = [
+        {
+            "id": f"create_assignee_{index}",
+            "label": _assignee_label(user),
+            "callback_data": f"create:assignee:{user['id']}",
+            "row": index,
+        }
+        for index, user in enumerate(resolution.options or [], start=1)
+        if user.get("id")
+    ]
+    row = len(options) + 1
+    options.extend(
+        [
+            {
+                "id": "create_skip_assignee",
+                "label": "Continuar sem responsavel",
+                "callback_data": "create:skip_assignee",
+                "row": row,
+            },
+            {"id": "global_menu", "label": "Voltar ao menu", "callback_data": "global:menu", "row": row},
+        ]
+    )
+    detail = (
+        "Escolha uma das opcoes abaixo."
+        if resolution.options
+        else "Envie outro nome ou e-mail de usuario cadastrado no Board."
+    )
+    return {
+        "current_flow": "task_create",
+        "current_step": "waiting_create_assignee_selection",
+        "create_draft": draft,
+        "final_message": (
+            f"Nao consegui vincular com seguranca o responsavel \"{draft.get('assignee_name')}\".\n\n{detail}"
+        ),
+        "response_ui": inline_keyboard(options),
+        "response_status": "waiting_user_input",
+        "response_data": {"assignee_options_count": len(resolution.options or [])},
+    }
+
+
+def _find_assignee_option(draft: dict[str, Any], selected_user_id: str) -> dict[str, str | None] | None:
+    for user in draft.get("assignee_options") or []:
+        if str(user.get("id")) == selected_user_id:
+            return user
+    return None
+
+
+def _assignee_label(user: dict[str, str | None]) -> str:
+    name = user.get("name") or "Usuario"
+    email = user.get("email")
+    return f"{name} ({email})" if email else name
 
 
 def _preview_message(preview: dict[str, Any]) -> str:

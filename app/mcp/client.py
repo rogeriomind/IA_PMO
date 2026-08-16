@@ -31,6 +31,7 @@ SEMANTIC_TOOL_ALIASES: dict[str, tuple[str, ...]] = {
         "list_tasks",
     ),
     "get_task": ("board_get_task", "get_task", "read_task", "task_get", "obter_tarefa", "consultar_tarefa"),
+    "search_users": ("board_search_users", "search_users", "find_users", "query_users", "buscar_usuarios"),
     "create_task": ("board_create_task", "create_task", "add_task", "create_card", "criar_tarefa", "adicionar_tarefa"),
     "update_task": ("board_update_task", "update_task", "edit_task", "patch_task", "atualizar_tarefa", "alterar_tarefa"),
     "move_task": ("board_move_task", "move_task", "move_card", "set_task_status", "mover_tarefa", "alterar_status_tarefa"),

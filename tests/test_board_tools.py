@@ -39,6 +39,17 @@ async def test_create_task_normalizes_priority_before_mcp_call():
 
 
 @pytest.mark.asyncio
+async def test_create_task_normalizes_assignee_alias_to_board_field():
+    fake_client = FakeClient()
+    board_tools = BoardTools(fake_client)
+
+    result = await board_tools.create_task({"title": "Teste", "assignee": "board-user-1"})
+
+    assert result["assigneeId"] == "board-user-1"
+    assert "assignee" not in result
+
+
+@pytest.mark.asyncio
 async def test_update_task_normalizes_due_date_before_mcp_call():
     fake_client = FakeClient()
     board_tools = BoardTools(fake_client)
@@ -52,6 +63,19 @@ async def test_update_task_normalizes_due_date_before_mcp_call():
     assert result == {"id": "TASK-1", "dueDate": "2026-07-04"}
     assert fake_client.calls[0] == ("search_tasks", {"search": "Configurar lembrete automatico"}, True)
     assert fake_client.calls[1][0] == "update_task"
+
+
+@pytest.mark.asyncio
+async def test_update_task_normalizes_assignee_id_alias_to_board_field():
+    fake_client = FakeClient()
+    board_tools = BoardTools(fake_client)
+
+    result = await board_tools.update_task(
+        task_id="TASK-1",
+        fields={"assignee_id": "board-user-1"},
+    )
+
+    assert result == {"id": "TASK-1", "assigneeId": "board-user-1"}
 
 
 def test_mcp_error_result_raises_runtime_error():
