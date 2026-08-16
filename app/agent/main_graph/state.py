@@ -6,6 +6,7 @@ from typing import Any, TypedDict
 class PMOAgentState(TypedDict, total=False):
     request_id: str
     correlation_id: str
+    api_version: str
     event_id: str
 
     thread_id: str

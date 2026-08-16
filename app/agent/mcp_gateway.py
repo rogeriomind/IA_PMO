@@ -22,6 +22,7 @@ from app.agent.errors import (
 )
 from app.agent.latency import record_mcp_call
 from app.agent.tool_registry import ToolRegistry, ToolSpec
+from app.infrastructure.observability.metrics import AgentMetrics
 from app.mcp.board_tools import BoardTools
 from app.storage.repository import PendingActionRepository
 
@@ -149,11 +150,13 @@ class MCPGateway:
         executor: MCPExecutor,
         repository: PendingActionRepository,
         result_max_chars: int,
+        metrics: AgentMetrics | None = None,
     ) -> None:
         self.registry = registry
         self.executor = executor
         self.repository = repository
         self.result_max_chars = result_max_chars
+        self.metrics = metrics
         self._failure_counts: dict[str, tuple[int, float]] = {}
 
     async def execute(
@@ -517,13 +520,18 @@ class MCPGateway:
             correlation_id=context.correlation_id,
             error_code=error_code,
         )
+        if self.metrics:
+            self.metrics.increment("mcp_calls_total", api_version=context.api_version)
+            self.metrics.increment("agent_mcp_calls_total", api_version=context.api_version)
         logger.info(
             "mcp_tool_call",
             extra={
                 "request_id": context.request_id,
                 "correlation_id": context.correlation_id,
+                "api_version": context.api_version,
                 "thread_id": context.thread_id,
                 "tenant_id": context.tenant_id,
+                "user_id": context.user_id,
                 "intent": context.intent,
                 "tool_name": spec.name,
                 "latency_ms": latency_ms,

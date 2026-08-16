@@ -6,6 +6,7 @@ from typing import Any, Literal, TypedDict
 class AgentState(TypedDict, total=False):
     request_id: str
     correlation_id: str
+    api_version: str
     thread_id: str
 
     tenant_id: str

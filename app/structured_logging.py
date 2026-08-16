@@ -18,8 +18,10 @@ class JsonFormatter(logging.Formatter):
         for key in (
             "request_id",
             "correlation_id",
+            "api_version",
             "thread_id",
             "tenant_id",
+            "user_id",
             "intent",
             "tool_name",
             "latency_ms",

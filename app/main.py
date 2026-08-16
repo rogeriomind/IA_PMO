@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 
 from app.agent.domains.projects.graph import build_project_subgraph
 from app.agent.domains.projects.nodes import ProjectNodes
@@ -33,6 +33,7 @@ from app.application.confirmation_service import AgentConfirmationService as Age
 from app.application.draft_service import DraftService
 from app.application.memory_service import MemoryService
 from app.application.task_selection_service import TaskSelectionService
+from app.api.deprecation import add_legacy_agent_deprecation_headers
 from app.api.middleware import install_correlation_middleware
 from app.api.routes.admin_tenants import router as admin_tenants_router
 from app.api.routes.agent_v1 import router as agent_v1_router
@@ -115,6 +116,7 @@ def create_app(
         control_plane = ControlPlaneRepository(app_settings, encryption)
         control_plane.init_db()
 
+        agent_metrics = AgentMetrics()
         mcp_client = MCPBoardClient(app_settings)
         board_tools = board_tools_override or BoardTools(mcp_client)
         gateway_board_tools = board_tools_override or BoardTools(mcp_client, read_retries=0)
@@ -127,7 +129,7 @@ def create_app(
         intent_service = IntentService(app_settings, tracer=tracer)
         response_service = ResponseService()
         pending_actions = PendingActionService(repository)
-        confirmation_service = ConfirmationService(pending_actions, board_tools)
+        confirmation_service = ConfirmationService(pending_actions, board_tools, metrics=agent_metrics)
         nodes = AgentGraphNodes(
             intent_service=intent_service,
             pending_actions=pending_actions,
@@ -135,6 +137,7 @@ def create_app(
             board_tools=board_tools,
             confirmation_service=confirmation_service,
             tracer=tracer,
+            metrics=agent_metrics,
         )
 
         app.state.settings = app_settings
@@ -158,6 +161,7 @@ def create_app(
             executor=BoardToolsExecutor(gateway_board_tools),
             repository=repository,
             result_max_chars=app_settings.agent_tool_result_max_chars,
+            metrics=agent_metrics,
         )
         v1_router = HybridIntentRouter(app_settings, tracer=tracer)
         observability = ObservabilityService(tracer)
@@ -238,7 +242,7 @@ def create_app(
             if app_settings.redis_enabled
             else ThreadLockManager(app_settings.agent_thread_lock_ttl_seconds)
         )
-        app.state.agent_metrics = AgentMetrics()
+        app.state.agent_metrics = agent_metrics
         app.state.v2_agent_graph = v2_graph
         app.state.v2_agent_service = AgentV2Service(
             graph=v2_graph,
@@ -319,10 +323,16 @@ def create_app(
             checks=checks,
         )
 
-    @api.post("/agent/invoke", response_model=AgentInvokeResponse)
-    async def agent_invoke(payload: AgentInvokeRequest) -> AgentInvokeResponse:
+    @api.post(
+        "/agent/invoke",
+        response_model=AgentInvokeResponse,
+        deprecated=True,
+        description="Deprecated. Use POST /v2/agent/events.",
+    )
+    async def agent_invoke(payload: AgentInvokeRequest, response: Response) -> AgentInvokeResponse:
         if not route_settings.effective_legacy_endpoints_enabled:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Legacy endpoint disabled")
+        add_legacy_agent_deprecation_headers(response, route_settings)
         tracer: LangfuseTracer = api.state.tracer
         trace = tracer.start_trace(
             name="agent.invoke",
@@ -367,11 +377,20 @@ def create_app(
             tracer.update_trace(trace, output=response.model_dump(mode="json"))
             return response
 
-    @api.post("/agent/process", response_model=ExternalAgentProcessResponse)
-    async def agent_process(payload: ExternalAgentProcessRequest) -> ExternalAgentProcessResponse:
+    @api.post(
+        "/agent/process",
+        response_model=ExternalAgentProcessResponse,
+        deprecated=True,
+        description="Deprecated. Use POST /v2/agent/events.",
+    )
+    async def agent_process(
+        payload: ExternalAgentProcessRequest,
+        response: Response,
+    ) -> ExternalAgentProcessResponse:
         """Compatibility endpoint for the existing PMO Agent ExternalAgentService contract."""
         if not route_settings.effective_legacy_endpoints_enabled:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Legacy endpoint disabled")
+        add_legacy_agent_deprecation_headers(response, route_settings)
         tracer: LangfuseTracer = api.state.tracer
         trace = tracer.start_trace(
             name="agent.process",
@@ -428,10 +447,17 @@ def create_app(
             tracer.update_trace(trace, output=response.model_dump(mode="json"))
             return response
 
-    @api.post("/agent/confirm", response_model=AgentConfirmResponse)
-    async def agent_confirm(payload: AgentConfirmRequest) -> AgentConfirmResponse:
+    @api.post(
+        "/agent/confirm",
+        response_model=AgentConfirmResponse,
+        deprecated=True,
+        description="Deprecated. Use POST /v2/agent/events.",
+    )
+    async def agent_confirm(payload: AgentConfirmRequest, response: Response) -> AgentConfirmResponse:
         if not route_settings.effective_legacy_endpoints_enabled:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Legacy endpoint disabled")
+        add_legacy_agent_deprecation_headers(response, route_settings)
+        api.state.agent_metrics.increment("agent_confirmations_total", api_version="legacy")
         tracer: LangfuseTracer = api.state.tracer
         trace = tracer.start_trace(
             name="agent.confirm",

@@ -72,8 +72,11 @@ Langfuse recebe payloads sanitizados em traces raiz por evento do agente, spans 
 
 - `agent_events_total`
 - `agent_event_duration_seconds`
+- `agent_requests_total`
+- `agent_latency_ms`
 - `agent_flow_transitions_total`
 - `agent_llm_calls_total`
+- `mcp_calls_total`
 - `agent_mcp_calls_total`
 - `agent_confirmations_total`
 - `agent_pending_actions_total`

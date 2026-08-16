@@ -2,15 +2,23 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.infrastructure.observability.metrics import AgentMetrics
 from app.mcp.board_tools import BoardTools
 from app.schemas import PendingActionStatus
 from app.services.pending_action_service import PendingActionService
 
 
 class ConfirmationService:
-    def __init__(self, pending_actions: PendingActionService, board_tools: BoardTools):
+    def __init__(
+        self,
+        pending_actions: PendingActionService,
+        board_tools: BoardTools,
+        *,
+        metrics: AgentMetrics | None = None,
+    ):
         self.pending_actions = pending_actions
         self.board_tools = board_tools
+        self.metrics = metrics
 
     async def confirm_and_execute(
         self,
@@ -47,6 +55,7 @@ class ConfirmationService:
         action_type = pending["action_type"]
         payload = pending["action_payload"] or {}
         idempotency_key = pending["id"]
+        self._record_legacy_mcp_call()
 
         if action_type == "create_task":
             return await self.board_tools.create_task(payload, idempotency_key=idempotency_key)
@@ -73,6 +82,11 @@ class ConfirmationService:
             )
         raise ValueError(f"Unsupported action type: {action_type}")
 
+    def _record_legacy_mcp_call(self) -> None:
+        if self.metrics:
+            self.metrics.increment("mcp_calls_total", api_version="legacy")
+            self.metrics.increment("agent_mcp_calls_total", api_version="legacy")
+
     @staticmethod
     def _success_message(action_type: str) -> str:
         return {
@@ -81,4 +95,3 @@ class ConfirmationService:
             "move_task": "Tarefa movida com sucesso no board.",
             "add_comment": "Comentario adicionado com sucesso no board.",
         }.get(action_type, "Acao executada com sucesso no board.")
-

@@ -175,6 +175,21 @@ def test_v2_requires_agent_token(client):
     assert response.status_code == 401
 
 
+def test_v2_official_endpoint_is_not_deprecated_and_records_metrics(client):
+    response = client.post("/v2/agent/events", headers=_headers(), json=_event("official-1", "welcome"))
+
+    assert response.status_code == 200
+    assert "Deprecation" not in response.headers
+    assert "Sunset" not in response.headers
+
+    schema = client.get("/openapi.json").json()
+    assert schema["paths"]["/v2/agent/events"]["post"].get("deprecated") is not True
+
+    metrics = client.app.state.agent_metrics
+    assert metrics.counters["agent_requests_total:api_version=v2"] == 1
+    assert "agent_latency_ms:api_version=v2" in metrics.observations
+
+
 def test_v2_welcome_with_name_returns_main_menu(client):
     response = client.post("/v2/agent/events", headers=_headers(), json=_event("welcome-1", "welcome"))
 
@@ -238,6 +253,7 @@ def test_v2_status_lists_tasks_and_status_selection_enters_update(client):
     ).json()
     assert update["flow"] == "task_update"
     assert update["status"] == "waiting_user_input"
+    assert client.app.state.agent_metrics.counters["mcp_calls_total:api_version=v2"] >= 3
 
 
 def test_v2_greeting_and_explicit_intent_override_sticky_status_flow(client):

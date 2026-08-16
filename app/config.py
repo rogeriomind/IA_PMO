@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     agent_update_page_size: int = Field(default=8, alias="AGENT_UPDATE_PAGE_SIZE")
 
     legacy_endpoints_enabled: bool | None = Field(default=None, alias="LEGACY_ENDPOINTS_ENABLED")
+    legacy_api_sunset_date: str = Field(default="", alias="LEGACY_API_SUNSET_DATE")
     v1_endpoints_enabled: bool = Field(default=True, alias="V1_ENDPOINTS_ENABLED")
     v2_endpoints_enabled: bool = Field(default=True, alias="V2_ENDPOINTS_ENABLED")
 

@@ -259,6 +259,7 @@ def _context(
         thread_id=state["thread_id"],
         tenant_id=state["tenant_id"],
         user_id=state["user_id"],
+        api_version=state.get("api_version", "v1"),
         user_roles=state.get("user_roles") or [],
         intent=intent or state.get("intent", "unknown"),
         approval_status=approval_status,
@@ -321,4 +322,3 @@ def _confirmation_message(tool_name: str, arguments: dict[str, Any]) -> str:
         target = arguments.get("task_id") or arguments.get("task_query")
         return f"Vou adicionar um comentario na tarefa {target}. Confirma?"
     return "Vou executar esta alteracao no board. Confirma?"
-

@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from app.graph.state import AgentState
+from app.infrastructure.observability.metrics import AgentMetrics
 from app.mcp.board_tools import drop_none
 from app.observability.langfuse import LangfuseTracer, TraceContext
 from app.schemas import Intent
@@ -25,6 +26,7 @@ class AgentGraphNodes:
         board_tools: Any,
         confirmation_service: ConfirmationService,
         tracer: LangfuseTracer,
+        metrics: AgentMetrics | None = None,
     ):
         self.intent_service = intent_service
         self.pending_actions = pending_actions
@@ -32,6 +34,7 @@ class AgentGraphNodes:
         self.board_tools = board_tools
         self.confirmation_service = confirmation_service
         self.tracer = tracer
+        self.metrics = metrics
 
     async def load_context(self, state: AgentState) -> AgentState:
         trace = state.get("_trace")
@@ -76,6 +79,7 @@ class AgentGraphNodes:
 
         with self.tracer.span(trace, "call_mcp_read_tool", metadata={"intent": intent.value, "project_id": project_id}):
             try:
+                self._record_legacy_mcp_call()
                 if intent == Intent.STATUS_BOARD:
                     result = await self.board_tools.get_project_status(project_id=project_id, query=state.get("message"))
                 elif "minhas" in state.get("message", "").casefold():
@@ -251,3 +255,8 @@ class AgentGraphNodes:
                 }
             )
         return {}
+
+    def _record_legacy_mcp_call(self) -> None:
+        if self.metrics:
+            self.metrics.increment("mcp_calls_total", api_version="legacy")
+            self.metrics.increment("agent_mcp_calls_total", api_version="legacy")

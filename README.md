@@ -2,9 +2,22 @@
 
 API FastAPI separada para receber mensagens ja tratadas pelo worker PMO, classificar intencao com LangGraph usando DeepSeek via API OpenAI-compatible, consultar ou preparar acoes no MCP do Board PMO, registrar observabilidade no Langfuse e devolver uma resposta pronta para o worker enviar ao usuario.
 
+## Agent API Architecture
+
+The official Agent API is V2.
+
+New integrations MUST use:
+
+```text
+POST /v2/agent/events
+```
+
+Legacy and V1 endpoints are deprecated and exist only for temporary compatibility.
+No new features should be implemented outside V2.
+
 ## Arquitetura
 
-Fluxo esperado:
+Fluxo legado ainda suportado temporariamente:
 
 ```text
 Worker atual
@@ -16,7 +29,19 @@ Worker atual
   -> load_pending_action -> execute_mcp_write_tool -> generate_response
 ```
 
-Toda acao de escrita cria antes um registro em `pending_actions`. O MCP so e chamado para escrita depois de `confirmed=true` em `/agent/confirm`.
+Toda acao de escrita cria antes um registro em `pending_actions`. No fluxo legado, o MCP so e chamado para escrita depois de `confirmed=true` em `/agent/confirm`.
+
+Arquitetura oficial para novos desenvolvimentos:
+
+```text
+Worker / PMO_productpulse
+  -> POST /v2/agent/events
+  -> AgentV2Service
+  -> LangGraph V2 main graph + domain subgraphs
+  -> policy / confirmation
+  -> MCPGateway
+  -> Board PMO MCP
+```
 
 ## MCP Board PMO
 
@@ -242,7 +267,9 @@ curl -X POST http://localhost:8010/agent/confirm \
 
 Com `confirmed=false`, a acao pendente e cancelada e nada e alterado no board.
 
-## API v1 recomendada para o worker
+## API v1 legada para compatibilidade
+
+A arquitetura v1 esta deprecated. Ela permanece ativa somente para compatibilidade temporaria com integracoes existentes; novas integracoes devem usar `POST /v2/agent/events`.
 
 A arquitetura v1 adiciona:
 
@@ -321,7 +348,7 @@ curl -X POST http://localhost:8010/v1/agent/confirmations \
 
 Detalhes da arquitetura: `docs/architecture-v1.md`.
 
-Guia completo para o worker: `docs/worker-integration.md`.
+Guia completo historico para o worker v1: `docs/worker-integration.md`.
 
 Exemplos de cliente: `examples/worker/pmo_agent_client.py` e `examples/worker/process_message.py`.
 
@@ -339,9 +366,9 @@ Configure no worker:
 PMO_AGENT_API_URL=http://pmo-ai-agent-api:8010
 ```
 
-Depois do debounce/fila/worker tratar a mensagem, envie o payload para `POST /agent/invoke`. Se a resposta pedir confirmacao, o worker deve armazenar ou repassar o `pending_action_id` e chamar `POST /agent/confirm` quando o usuario confirmar.
+Depois do debounce/fila/worker tratar a mensagem, integracoes antigas ainda podem enviar o payload para `POST /agent/invoke`. Se a resposta pedir confirmacao, o worker deve armazenar ou repassar o `pending_action_id` e chamar `POST /agent/confirm` quando o usuario confirmar.
 
-Para novas integracoes, prefira `/v1/agent/messages` e `/v1/agent/confirmations`.
+Para novas integracoes, use `POST /v2/agent/events`.
 
 ## Langfuse
 

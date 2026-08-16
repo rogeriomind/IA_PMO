@@ -19,6 +19,8 @@ async def post_event(
     request: Request,
     context: RequestContext = Depends(get_authenticated_request_context),
 ) -> AgentV2Response:
+    if payload.message_type == "confirmation":
+        request.app.state.agent_metrics.increment("agent_confirmations_total", api_version="v2")
     return await request.app.state.v2_agent_service.handle_event(payload, context)
 
 

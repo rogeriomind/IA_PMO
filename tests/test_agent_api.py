@@ -68,6 +68,7 @@ board_list_my_tasks
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         mcp_board_doc_path=str(doc_path),
         langfuse_enabled=False,
+        legacy_api_sunset_date="2026-12-31",
     )
     fake_tools = FakeBoardTools()
     app = create_app(settings=settings, board_tools_override=fake_tools)
@@ -106,6 +107,33 @@ def test_health(client):
     assert body["model"] == "deepseek-v4-flash"
     assert body["mcp_loaded"] is True
     assert body["checks"]["llm_provider"] == "deepseek"
+
+
+def test_legacy_endpoint_is_deprecated_and_records_version_metrics(client):
+    response = client.post(
+        "/agent/confirm",
+        json={
+            "conversation_id": "whatsapp_metrics",
+            "user_id": "1",
+            "pending_action_id": "missing",
+            "confirmed": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Deprecation"] == "true"
+    assert response.headers["Sunset"] == "2026-12-31"
+    assert response.headers["Link"] == '</v2/agent/events>; rel="successor-version"'
+
+    schema = client.get("/openapi.json").json()
+    assert schema["paths"]["/agent/invoke"]["post"]["deprecated"] is True
+    assert schema["paths"]["/agent/process"]["post"]["deprecated"] is True
+    assert schema["paths"]["/agent/confirm"]["post"]["deprecated"] is True
+
+    metrics = client.app.state.agent_metrics
+    assert metrics.counters["agent_requests_total:api_version=legacy"] == 1
+    assert metrics.counters["agent_confirmations_total:api_version=legacy"] == 1
+    assert "agent_latency_ms:api_version=legacy" in metrics.observations
 
 
 def test_task_create_with_title_generates_pending_action_without_write(client):

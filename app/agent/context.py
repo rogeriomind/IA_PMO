@@ -14,8 +14,8 @@ class ToolExecutionContext:
     thread_id: str
     tenant_id: str
     user_id: str
+    api_version: str = "unknown"
     user_roles: list[str] = field(default_factory=list)
     intent: str = "unknown"
     approval_status: ApprovalStatus = "not_required"
     idempotency_key: str | None = None
-

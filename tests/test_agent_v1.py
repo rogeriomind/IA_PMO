@@ -90,6 +90,39 @@ def test_tool_registry_has_only_expected_board_tools(client):
     assert client.app.state.tool_registry.names() == expected
 
 
+def test_v1_endpoints_are_deprecated_and_record_version_metrics(client):
+    response = client.post(
+        "/v1/agent/confirmations",
+        headers={
+            "X-Request-ID": "req-deprecated",
+            "X-Correlation-ID": "corr-deprecated",
+            "X-Tenant-ID": "porto",
+            "X-User-ID": "user-1",
+            "X-User-Roles": "board.read,board.manage",
+        },
+        json={
+            "thread_id": "porto:telegram:123",
+            "confirmation_id": "missing",
+            "approved": True,
+            "message": "confirmo",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Deprecation"] == "true"
+    assert "Sunset" not in response.headers
+    assert response.headers["Link"] == '</v2/agent/events>; rel="successor-version"'
+
+    schema = client.get("/openapi.json").json()
+    assert schema["paths"]["/v1/agent/messages"]["post"]["deprecated"] is True
+    assert schema["paths"]["/v1/agent/confirmations"]["post"]["deprecated"] is True
+
+    metrics = client.app.state.agent_metrics
+    assert metrics.counters["agent_requests_total:api_version=v1"] == 1
+    assert metrics.counters["agent_confirmations_total:api_version=v1"] == 1
+    assert "agent_latency_ms:api_version=v1" in metrics.observations
+
+
 def test_v1_my_tasks_uses_deterministic_router(client):
     response = client.post(
         "/v1/agent/messages",
@@ -114,6 +147,7 @@ def test_v1_my_tasks_uses_deterministic_router(client):
     assert body["status"] == "completed"
     assert body["intent"] == "user.my_tasks"
     assert "minha tarefa" in body["message"]
+    assert client.app.state.agent_metrics.counters["mcp_calls_total:api_version=v1"] == 1
 
 
 def test_v1_write_requires_confirmation_before_mcp_write(client):

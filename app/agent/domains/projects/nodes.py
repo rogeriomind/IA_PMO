@@ -33,6 +33,7 @@ class ProjectNodes:
                 thread_id=state["thread_id"],
                 tenant_id=state["tenant_id"],
                 user_id=state["user_id"],
+                api_version=state.get("api_version", "v1"),
                 user_roles=state.get("user_roles") or [],
                 intent=state.get("intent", "project.status"),
                 approval_status="not_required",

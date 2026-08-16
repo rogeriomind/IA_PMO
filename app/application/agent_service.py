@@ -125,6 +125,7 @@ def _state_from_payload(payload: AgentEventEnvelope, context: RequestContext) ->
     return {
         "request_id": payload.request_id or context.request_id,
         "correlation_id": payload.correlation_id or context.correlation_id,
+        "api_version": "v2",
         "event_id": payload.event_id,
         "thread_id": payload.thread_id,
         "tenant_id": payload.tenant_id,

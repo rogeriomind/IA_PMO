@@ -604,6 +604,7 @@ def _context(state: PMOAgentState, *, intent: str) -> ToolExecutionContext:
         thread_id=state["thread_id"],
         tenant_id=state["tenant_id"],
         user_id=state["user_id"],
+        api_version=state.get("api_version", "v2"),
         user_roles=state.get("user_roles") or [],
         intent=intent,
         approval_status="not_required",
