@@ -115,18 +115,19 @@ class AgentBenchmark:
 
     async def get_task(self, client: httpx.AsyncClient, index: int) -> tuple[dict[str, Any], int]:
         thread_id = f"bench-get-{index}-{uuid4()}"
-        await self.post_event(
+        status, _ = await self.post_event(
             client,
             thread_id=thread_id,
             message_type="menu_selection",
             callback_data="menu:status",
             measured=False,
         )
+        task_callback = _first_task_callback(status) or "status:task:1"
         return await self.post_event(
             client,
             thread_id=thread_id,
             message_type="task_selection",
-            callback_data="status:task:1",
+            callback_data=task_callback,
         )
 
     async def create_preview(self, client: httpx.AsyncClient, index: int) -> tuple[dict[str, Any], int]:
@@ -247,7 +248,10 @@ async def run(args: argparse.Namespace) -> None:
                 latency = (body.get("data") or {}).get("latency") or {}
                 bucket.add(elapsed_ms, latency)
 
-    print("scenario,total_p50,total_p90,total_p95,total_p99,total_max,langgraph_p95,llm_p95,mcp_p95,memory_p95")
+    print(
+        "scenario,mcp_transport,total_p50,total_p90,total_p95,total_p99,total_max,"
+        "langgraph_p95,llm_p95,mcp_p95,memory_p95"
+    )
     for name, bucket in results.items():
         total = summary(bucket.totals)
         subgraph = summary(bucket.breakdowns["subgraph_ms"])
@@ -256,7 +260,7 @@ async def run(args: argparse.Namespace) -> None:
         memory_values = bucket.breakdowns["memory_load_ms"] + bucket.breakdowns["memory_persist_ms"]
         memory = summary(memory_values)
         print(
-            f"{name},{total['p50']},{total['p90']},{total['p95']},{total['p99']},{total['max']},"
+            f"{name},{args.mcp_transport},{total['p50']},{total['p90']},{total['p95']},{total['p99']},{total['max']},"
             f"{subgraph['p95']},{llm['p95']},{mcp['p95']},{memory['p95']}"
         )
 
@@ -270,9 +274,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--user-id", default=os.getenv("AGENT_BENCH_USER_ID", "benchmark"))
     parser.add_argument("--project-id", default=os.getenv("AGENT_BENCH_PROJECT_ID"))
     parser.add_argument("--task-id", default=os.getenv("AGENT_BENCH_TASK_ID"))
+    parser.add_argument("--mcp-transport", default=os.getenv("MCP_BOARD_TRANSPORT", "unknown"))
     parser.add_argument("--include-writes", action="store_true")
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     return parser.parse_args()
+
+
+def _first_task_callback(response: dict[str, Any]) -> str | None:
+    ui = response.get("ui") or {}
+    for option in ui.get("options") or []:
+        callback = option.get("callback_data")
+        if isinstance(callback, str) and callback.startswith(("status:id:", "status:task:")):
+            return callback
+    return None
 
 
 if __name__ == "__main__":

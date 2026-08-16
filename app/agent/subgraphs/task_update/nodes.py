@@ -16,6 +16,8 @@ from app.agent.subgraphs.common import (
     inline_keyboard,
     looks_like_task_code,
     numbered_list,
+    normalize_task_payload,
+    task_assignee_name,
     task_due_date,
     task_id,
     task_title,
@@ -267,7 +269,7 @@ class UpdateTaskSubgraph:
             arguments={"id": selected_task_id},
             context=_context(state, intent="task.get"),
         )
-        task_payload = task.result if isinstance(task.result, dict) else {"id": selected_task_id, "raw": task.result}
+        task_payload = normalize_task_payload(task.result, fallback_id=selected_task_id)
         await self.drafts.save(
             tenant_id=state["tenant_id"],
             thread_id=state["thread_id"],
@@ -433,8 +435,7 @@ class UpdateTaskSubgraph:
                 arguments={"id": selected_task_id},
                 context=_context(state, intent="task.get"),
             )
-            if isinstance(task.result, dict):
-                return task.result
+            return normalize_task_payload(task.result, fallback_id=selected_task_id)
         except Exception:
             pass
         return {"id": selected_task_id}
@@ -461,7 +462,7 @@ def _preview_message(preview: dict[str, Any]) -> str:
         lines.append(f"Data atual: {format_date_br(task_due_date(task))}")
         lines.append(f"Nova data: {format_date_br(fields['due_date'])}")
     if "assignee_id" in fields:
-        current_assignee = task.get("assignee") or task.get("assignee_name") or "nao informado"
+        current_assignee = task_assignee_name(task)
         lines.append(f"Responsavel atual: {current_assignee}")
         lines.append(f"Novo responsavel: {fields['assignee_id']}")
     if preview.get("comment"):

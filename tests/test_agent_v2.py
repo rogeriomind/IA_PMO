@@ -43,7 +43,8 @@ class FakeBoardToolsV2:
         return [task for task in self.tasks.values() if query.casefold() in task["title"].casefold()]
 
     async def get_task(self, task_id: str):
-        return self.tasks.get(task_id, {"id": task_id, "title": f"Tarefa {task_id}", "due_date": None})
+        task = self.tasks.get(task_id, {"id": task_id, "title": f"Tarefa {task_id}", "due_date": None})
+        return {"task": task}
 
     async def get_project_status(self, project_id: str | None = None, query: str | None = None):
         return {"status": "ok"}
@@ -161,7 +162,6 @@ def test_v2_welcome_with_name_returns_main_menu(client):
         "menu:status",
         "menu:create",
         "menu:update",
-        "menu:questions",
     ]
 
 
@@ -178,15 +178,30 @@ def test_v2_status_lists_tasks_and_status_selection_enters_update(client):
     assert "Bloqueadas" in body["message"]
     assert "Atrasadas" in body["message"]
     assert "Para hoje" in body["message"]
-    assert body["ui"]["options"][0]["callback_data"] == "status:task:1"
+    assert body["ui"]["type"] == "inline_keyboard"
+    assert body["ui"]["context_id"]
+    assert body["ui"]["options"][0]["callback_data"] == "status:id:TASK-BLOCK"
+    assert body["ui"]["options"][0]["label"] == "Ver 1"
+    assert "status:update_task" not in [option["callback_data"] for option in body["ui"]["options"]]
+
+    update_without_task = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("status-no-task-update", "menu_selection", callback_data="status:update_task"),
+    ).json()
+    assert update_without_task["flow"] == "task_update"
+    assert update_without_task["step"] == "waiting_task_selection"
 
     detail = client.post(
         "/v2/agent/events",
         headers=_headers(),
-        json=_event("status-2", "task_selection", callback_data="status:task:1"),
+        json=_event("status-2", "task_selection", callback_data="status:id:TASK-BLOCK"),
     ).json()
     assert detail["step"] == "showing_task_detail"
     assert detail["data"]["task"]["id"] == "TASK-BLOCK"
+    assert detail["data"]["task"]["assignee"] == {"id": None, "name": None}
+    assert "Status: Bloqueada" in detail["message"]
+    assert "Responsável: Não informado" in detail["message"]
 
     update = client.post(
         "/v2/agent/events",
@@ -195,6 +210,39 @@ def test_v2_status_lists_tasks_and_status_selection_enters_update(client):
     ).json()
     assert update["flow"] == "task_update"
     assert update["status"] == "waiting_user_input"
+
+
+def test_v2_greeting_and_explicit_intent_override_sticky_status_flow(client):
+    client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("sticky-status-1", "menu_selection", callback_data="menu:status"),
+    )
+
+    greeting = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("sticky-status-2", "text", text="Ol\u00e1"),
+    ).json()
+    assert greeting["flow"] == "main_menu"
+    assert [option["callback_data"] for option in greeting["ui"]["options"]] == [
+        "menu:status",
+        "menu:create",
+        "menu:update",
+    ]
+
+    client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("sticky-status-3", "menu_selection", callback_data="menu:status"),
+    )
+    explicit_update = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("sticky-status-4", "text", text="atualizar atividade"),
+    ).json()
+    assert explicit_update["flow"] == "task_update"
+    assert explicit_update["step"] == "waiting_task_selection"
 
 
 def test_v2_create_extracts_fields_requires_confirmation_and_replays_event(client):

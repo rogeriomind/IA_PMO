@@ -18,6 +18,7 @@ class FakeSelectionService:
 
     async def replace_map(self, **kwargs):
         self.tasks = kwargs["tasks"]
+        return {str(index): task["id"] for index, task in enumerate(self.tasks, start=1)}
 
 
 class DelayedGateway:

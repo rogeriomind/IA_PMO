@@ -186,10 +186,10 @@ jobs:
           ensure_env_var LANGFUSE_PUBLIC_KEY "$langfuse_init_public_key"
           ensure_env_var LANGFUSE_SECRET_KEY "$langfuse_init_secret_key"
 
-          docker compose build
+          docker compose build pmo-ai-agent-api
           docker compose up -d postgres
           docker compose run --rm pmo-ai-agent-api alembic upgrade head
-          docker compose up -d
+          docker compose up -d --no-deps pmo-ai-agent-api
 
           for _ in $(seq 1 24); do
             if curl -fsS "http://localhost:${AGENT_PORT}/health" >/tmp/pmo-agent-health.json; then

@@ -16,6 +16,14 @@ GLOBAL_TEXT_COMMANDS = {
     "reiniciar": "reset",
 }
 
+ISOLATED_GREETINGS = {
+    "ola",
+    "oi",
+    "bom dia",
+    "boa tarde",
+    "boa noite",
+}
+
 
 def plain(value: str | None) -> str:
     text = unicodedata.normalize("NFKD", (value or "").casefold())
@@ -33,7 +41,10 @@ def global_command(state: PMOAgentState) -> str | None:
         return "menu"
     if callback == "global:reset" or state.get("message_type") == "reset":
         return "reset"
-    return GLOBAL_TEXT_COMMANDS.get(plain(state.get("message_text")))
+    normalized = plain(state.get("message_text"))
+    if normalized in ISOLATED_GREETINGS:
+        return "menu"
+    return GLOBAL_TEXT_COMMANDS.get(normalized)
 
 
 def infer_menu_from_text(text: str | None) -> str | None:

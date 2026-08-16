@@ -491,6 +491,45 @@ class PendingActionRepository:
                 return None
             return self._selection_to_dict(record)
 
+    def resolve_task_selection_with_status(
+        self,
+        *,
+        tenant_id: str,
+        thread_id: str,
+        user_id: str,
+        context: str,
+        selection_number: int,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        with self.SessionLocal() as session:
+            record = session.scalar(
+                select(AgentTaskSelectionMapModel).where(
+                    AgentTaskSelectionMapModel.tenant_id == tenant_id,
+                    AgentTaskSelectionMapModel.thread_id == thread_id,
+                    AgentTaskSelectionMapModel.user_id == user_id,
+                    AgentTaskSelectionMapModel.context == context,
+                    AgentTaskSelectionMapModel.selection_number == selection_number,
+                )
+            )
+            if record:
+                if _is_expired_datetime(record.expires_at, now):
+                    return {"status": "expired", "selection": None}
+                return {"status": "ok", "selection": self._selection_to_dict(record)}
+
+            latest = session.scalar(
+                select(AgentTaskSelectionMapModel)
+                .where(
+                    AgentTaskSelectionMapModel.tenant_id == tenant_id,
+                    AgentTaskSelectionMapModel.thread_id == thread_id,
+                    AgentTaskSelectionMapModel.user_id == user_id,
+                    AgentTaskSelectionMapModel.context == context,
+                )
+                .order_by(AgentTaskSelectionMapModel.expires_at.desc())
+            )
+            if latest and _is_expired_datetime(latest.expires_at, now):
+                return {"status": "expired", "selection": None}
+            return {"status": "not_found", "selection": None}
+
     def upsert_draft(
         self,
         *,

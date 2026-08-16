@@ -80,6 +80,7 @@ class PMOMainGraphNodes:
                 "selected_task_id": summary.get("selected_task_id"),
                 "selected_task_number": summary.get("selected_task_number"),
                 "task_selection_map": summary.get("task_selection_map") or {},
+                "last_ui_context_id": state.get("last_ui_context_id") or summary.get("last_ui_context_id"),
                 "create_draft": summary.get("create_draft") or {},
                 "update_draft": summary.get("update_draft") or {},
                 "pending_action_id": summary.get("pending_action_id"),
@@ -139,15 +140,21 @@ class PMOMainGraphNodes:
                     "previous_step": state.get("current_step"),
                     "route": menu_route,
                 }
-            if callback.startswith("status:") or state.get("current_flow") == "status":
+            if callback.startswith("status:"):
                 return {"route": "status"}
-            if callback.startswith("update:") or state.get("current_flow") == "task_update":
+            if callback.startswith("update:"):
                 return {"route": "task_update"}
-            if callback.startswith("create:") or state.get("current_flow") == "task_create":
+            if callback.startswith("create:"):
                 return {"route": "task_create"}
             inferred = infer_menu_from_text(state.get("message_text"))
             if inferred:
                 return {"selected_menu": inferred, "route": inferred}
+            if state.get("current_flow") == "status":
+                return {"route": "status"}
+            if state.get("current_flow") == "task_update":
+                return {"route": "task_update"}
+            if state.get("current_flow") == "task_create":
+                return {"route": "task_create"}
             return {"route": "welcome"}
         finally:
             finish_latency_stage("routing")
@@ -180,6 +187,7 @@ class PMOMainGraphNodes:
 
     async def persist_session_summary(self, state: PMOAgentState) -> PMOAgentState:
         mark_latency("memory_persist_started_at")
+        response_ui = state.get("response_ui") or {}
         summary = {
             "current_flow": state.get("current_flow") or "main_menu",
             "current_step": state.get("current_step") or "waiting_menu_selection",
@@ -189,6 +197,7 @@ class PMOMainGraphNodes:
             "selected_task_id": state.get("selected_task_id"),
             "selected_task_number": state.get("selected_task_number"),
             "task_selection_map": state.get("task_selection_map") or {},
+            "last_ui_context_id": response_ui.get("context_id") or state.get("last_ui_context_id"),
             "create_draft": state.get("create_draft") or {},
             "update_draft": state.get("update_draft") or {},
             "pending_action_id": state.get("pending_action_id"),
