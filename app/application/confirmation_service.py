@@ -104,6 +104,7 @@ class AgentConfirmationService:
             tool_name = operation["tool_name"]
             arguments = operation.get("arguments") or {}
             intent = operation.get("intent") or _intent_for_tool(tool_name)
+            project_id = arguments.get("project_id") or arguments.get("projectId")
             idempotency_key = _operation_idempotency_key(
                 tenant_id=tenant_id,
                 request_id=pending.get("request_id") or pending_action_id,
@@ -126,6 +127,8 @@ class AgentConfirmationService:
                         intent=intent,
                         approval_status="approved",
                         idempotency_key=idempotency_key,
+                        project_id=project_id,
+                        activity_id=arguments.get("task_id") or arguments.get("id") or arguments.get("activity_id"),
                     ),
                 )
                 results.append(
@@ -222,9 +225,11 @@ class AgentConfirmationService:
         results: list[dict[str, Any]],
     ) -> Any | None:
         task_id = None
+        project_id = None
         for operation in pending.get("operations") or []:
             args = operation.get("arguments") or {}
-            task_id = args.get("task_id") or args.get("id")
+            project_id = project_id or args.get("project_id") or args.get("projectId")
+            task_id = args.get("task_id") or args.get("id") or args.get("activity_id") or args.get("activityId")
             if task_id:
                 break
         if not task_id:
@@ -232,6 +237,7 @@ class AgentConfirmationService:
                 payload = result.get("result")
                 if isinstance(payload, dict):
                     task_id = payload.get("id") or payload.get("task_id")
+                    project_id = project_id or payload.get("project_id") or payload.get("projectId")
                     if task_id:
                         break
         if not task_id:
@@ -239,7 +245,7 @@ class AgentConfirmationService:
         try:
             execution = await self.gateway.execute(
                 tool_name="board_get_task",
-                arguments={"id": task_id},
+                arguments={"id": task_id, "project_id": project_id},
                 context=ToolExecutionContext(
                     request_id=pending.get("request_id") or pending["id"],
                     correlation_id=pending.get("correlation_id") or pending["id"],
@@ -250,6 +256,8 @@ class AgentConfirmationService:
                     user_roles=user_roles,
                     intent="task.get",
                     approval_status="not_required",
+                    project_id=project_id,
+                    activity_id=task_id,
                 ),
             )
             return execution.result

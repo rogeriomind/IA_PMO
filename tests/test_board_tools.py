@@ -32,10 +32,25 @@ async def test_create_task_normalizes_priority_before_mcp_call():
     fake_client = FakeClient()
     board_tools = BoardTools(fake_client)
 
-    result = await board_tools.create_task({"title": "Teste", "priority": "baixa"})
+    result = await board_tools.create_task(
+        tenant_id="tenant-a",
+        project_id="project-1",
+        payload={"title": "Teste", "priority": "baixa"},
+        idempotency_key="idem-1",
+    )
 
     assert result["priority"] == "LOW"
-    assert fake_client.calls[0][0] == "create_task"
+    assert fake_client.calls[0] == (
+        "create_task",
+        {
+            "tenantId": "tenant-a",
+            "projectId": "project-1",
+            "idempotencyKey": "idem-1",
+            "title": "Teste",
+            "priority": "LOW",
+        },
+        False,
+    )
 
 
 @pytest.mark.asyncio
@@ -43,7 +58,12 @@ async def test_create_task_normalizes_assignee_alias_to_board_field():
     fake_client = FakeClient()
     board_tools = BoardTools(fake_client)
 
-    result = await board_tools.create_task({"title": "Teste", "assignee": "board-user-1"})
+    result = await board_tools.create_task(
+        tenant_id="tenant-a",
+        project_id="project-1",
+        payload={"title": "Teste", "assignee": "board-user-1"},
+        idempotency_key="idem-1",
+    )
 
     assert result["assigneeId"] == "board-user-1"
     assert "assignee" not in result
@@ -55,13 +75,26 @@ async def test_update_task_normalizes_due_date_before_mcp_call():
     board_tools = BoardTools(fake_client)
 
     result = await board_tools.update_task(
+        tenant_id="tenant-a",
+        project_id="project-1",
         task_id=None,
         task_query="Configurar lembrete automatico",
         fields={"due_date": "2026-07-04"},
+        idempotency_key="idem-2",
     )
 
-    assert result == {"id": "TASK-1", "dueDate": "2026-07-04"}
-    assert fake_client.calls[0] == ("search_tasks", {"search": "Configurar lembrete automatico"}, True)
+    assert result == {
+        "tenantId": "tenant-a",
+        "projectId": "project-1",
+        "activityId": "TASK-1",
+        "idempotencyKey": "idem-2",
+        "dueDate": "2026-07-04",
+    }
+    assert fake_client.calls[0] == (
+        "search_tasks",
+        {"tenantId": "tenant-a", "projectId": "project-1", "search": "Configurar lembrete automatico"},
+        True,
+    )
     assert fake_client.calls[1][0] == "update_task"
 
 
@@ -71,11 +104,64 @@ async def test_update_task_normalizes_assignee_id_alias_to_board_field():
     board_tools = BoardTools(fake_client)
 
     result = await board_tools.update_task(
+        tenant_id="tenant-a",
+        project_id="project-1",
         task_id="TASK-1",
         fields={"assignee_id": "board-user-1"},
+        idempotency_key="idem-3",
     )
 
-    assert result == {"id": "TASK-1", "assigneeId": "board-user-1"}
+    assert result == {
+        "tenantId": "tenant-a",
+        "projectId": "project-1",
+        "activityId": "TASK-1",
+        "idempotencyKey": "idem-3",
+        "assigneeId": "board-user-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_tasks_sends_tenant_and_project_contract():
+    fake_client = FakeClient()
+    board_tools = BoardTools(fake_client)
+
+    await board_tools.search_tasks(tenant_id="tenant-a", project_id="project-1", query="API")
+
+    assert fake_client.calls[0] == (
+        "search_tasks",
+        {"tenantId": "tenant-a", "projectId": "project-1", "search": "API"},
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_project_reads_are_project_scoped():
+    fake_client = FakeClient()
+    board_tools = BoardTools(fake_client)
+
+    await board_tools.get_project_status(tenant_id="tenant-a", project_id="project-1")
+    await board_tools.list_blockers(tenant_id="tenant-a", project_id="project-1")
+    await board_tools.list_my_tasks(
+        tenant_id="tenant-a",
+        project_id="project-1",
+        assignee_id="user-1",
+        include_completed=False,
+    )
+
+    assert fake_client.calls == [
+        ("get_project_status", {"tenantId": "tenant-a", "projectId": "project-1"}, True),
+        ("list_blockers", {"tenantId": "tenant-a", "projectId": "project-1"}, True),
+        (
+            "list_my_tasks",
+            {
+                "tenantId": "tenant-a",
+                "projectId": "project-1",
+                "assigneeId": "user-1",
+                "includeCompleted": False,
+            },
+            True,
+        ),
+    ]
 
 
 def test_mcp_error_result_raises_runtime_error():

@@ -10,7 +10,8 @@ flowchart TD
   load_thread_memory --> normalize_event
   normalize_event --> handle_global_commands
   handle_global_commands --> resolve_current_flow
-  resolve_current_flow --> route_to_subgraph
+  resolve_current_flow --> resolve_domain_context
+  resolve_domain_context --> route_to_subgraph
   route_to_subgraph --> persist_session_summary
   persist_session_summary --> build_api_response
   build_api_response --> END
@@ -65,7 +66,7 @@ sequenceDiagram
   API-->>U: resultado
 ```
 
-Obrigatorios: `title`, `due_date`. Opcionais: `description`, `assignee`, `priority`, `project_id`.
+Obrigatorios: `title`, `due_date` e `project_id` resolvido no contexto da conversa. Opcionais: `description`, `assignee`, `priority`.
 
 ## Atualizacao
 
@@ -90,6 +91,7 @@ Uma mensagem pode gerar varias operacoes. Exemplo:
     "tool_name": "board_update_task",
     "arguments": {
       "task_id": "TASK-123",
+      "project_id": "project-123",
       "fields": {"due_date": "2026-07-17"}
     }
   },
@@ -97,6 +99,7 @@ Uma mensagem pode gerar varias operacoes. Exemplo:
     "tool_name": "board_add_comment",
     "arguments": {
       "task_id": "TASK-123",
+      "project_id": "project-123",
       "comment": "Aguardando retorno do CRM."
     }
   }

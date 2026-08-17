@@ -37,6 +37,7 @@ class ProjectNodes:
                 user_roles=state.get("user_roles") or [],
                 intent=state.get("intent", "project.status"),
                 approval_status="not_required",
+                project_id=(state.get("tool_input") or {}).get("project_id"),
             ),
         )
         return {"tool_result": result.model_dump(), "data": {"result": result.result}}

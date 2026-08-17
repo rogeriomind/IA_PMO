@@ -137,7 +137,7 @@ def test_v1_my_tasks_uses_deterministic_router(client):
             "thread_id": "porto:telegram:123",
             "message": "Minhas tarefas",
             "channel": "telegram",
-            "metadata": {},
+            "metadata": {"project_id": "project-1"},
         },
     )
 
@@ -164,7 +164,7 @@ def test_v1_write_requires_confirmation_before_mcp_write(client):
             "thread_id": "porto:telegram:123",
             "message": "Mova a tarefa TASK-123 para concluido",
             "channel": "telegram",
-            "metadata": {},
+            "metadata": {"project_id": "project-1"},
         },
     )
 
@@ -190,7 +190,7 @@ def test_v1_confirmation_executes_write_once_and_read_after_write(client):
             "thread_id": "porto:telegram:123",
             "message": "Mova a tarefa TASK-123 para concluido",
             "channel": "telegram",
-            "metadata": {},
+            "metadata": {"project_id": "project-1"},
         },
     ).json()
 
@@ -234,7 +234,7 @@ def test_v1_confirmation_rejects_ambiguous_approval_message(client):
             "thread_id": "porto:telegram:123",
             "message": "Mova a tarefa TASK-123 para concluido",
             "channel": "telegram",
-            "metadata": {},
+            "metadata": {"project_id": "project-1"},
         },
     ).json()
 

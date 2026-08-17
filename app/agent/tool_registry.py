@@ -10,26 +10,38 @@ ToolType = Literal["read", "write"]
 
 
 class StrictToolInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-class SearchTasksInput(StrictToolInput):
-    search: str | None = None
-    query: str | None = None
-    project_id: str | None = None
+class TenantScopedInput(StrictToolInput):
+    tenant_id: str = Field(min_length=1, alias="tenantId")
 
 
-class GetTaskInput(StrictToolInput):
-    id: str | None = None
-    task_id: str | None = None
+class ProjectScopedInput(TenantScopedInput):
+    project_id: str = Field(min_length=1, alias="projectId")
 
 
-class SearchUsersInput(StrictToolInput):
-    query: str | None = None
+class ActivityScopedInput(ProjectScopedInput):
+    activity_id: str = Field(min_length=1, alias="activityId")
+
+
+class SearchTasksInput(ProjectScopedInput):
+    search: str = Field(min_length=1)
     limit: int | None = None
 
 
-class CreateTaskInput(StrictToolInput):
+class GetTaskInput(ActivityScopedInput):
+    pass
+
+
+class SearchUsersInput(TenantScopedInput):
+    query: str | None = None
+    limit: int | None = None
+    project_id: str | None = Field(default=None, alias="projectId")
+
+
+class CreateTaskInput(ProjectScopedInput):
+    idempotency_key: str | None = Field(default=None, alias="idempotencyKey")
     title: str = Field(min_length=1)
     description: str | None = None
     assignee: str | None = None
@@ -37,46 +49,40 @@ class CreateTaskInput(StrictToolInput):
     priority: str | None = None
     due_date: str | None = None
     dueDate: str | None = None
-    project: str | None = None
-    project_id: str | None = None
     status: str | None = None
 
 
-class UpdateTaskInput(StrictToolInput):
-    task_id: str | None = None
-    id: str | None = None
+class UpdateTaskInput(ActivityScopedInput):
+    idempotency_key: str | None = Field(default=None, alias="idempotencyKey")
     task_query: str | None = None
     fields: dict[str, Any] = Field(default_factory=dict)
 
 
-class MoveTaskInput(StrictToolInput):
-    task_id: str | None = None
-    id: str | None = None
+class MoveTaskInput(ActivityScopedInput):
+    idempotency_key: str | None = Field(default=None, alias="idempotencyKey")
     task_query: str | None = None
     status: str = Field(min_length=1)
 
 
-class AddCommentInput(StrictToolInput):
-    task_id: str | None = None
-    id: str | None = None
+class AddCommentInput(ActivityScopedInput):
+    idempotency_key: str | None = Field(default=None, alias="idempotencyKey")
     task_query: str | None = None
     comment: str = Field(min_length=1)
 
 
-class ProjectStatusInput(StrictToolInput):
-    project_id: str | None = None
-    query: str | None = None
+class ProjectStatusInput(ProjectScopedInput):
+    pass
 
 
-class ListBlockersInput(StrictToolInput):
-    project_id: str | None = None
+class ListBlockersInput(ProjectScopedInput):
+    assigneeId: str | None = None
 
 
-class ListMyTasksInput(StrictToolInput):
+class ListMyTasksInput(ProjectScopedInput):
     user_id: str | None = None
     assigneeId: str | None = None
     assigneeEmail: str | None = None
-    project_id: str | None = None
+    includeCompleted: bool | None = None
 
 
 @dataclass(frozen=True)

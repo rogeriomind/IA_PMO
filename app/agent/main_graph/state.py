@@ -11,6 +11,7 @@ class PMOAgentState(TypedDict, total=False):
 
     thread_id: str
     tenant_id: str
+    active_tenant_id: str
     channel: str
 
     user_id: str
@@ -33,6 +34,10 @@ class PMOAgentState(TypedDict, total=False):
     selected_task_number: int | None
     task_selection_map: dict[str, str]
     last_ui_context_id: str | None
+    active_project_id: str | None
+    active_project_name: str | None
+    active_portfolio_id: str | None
+    active_activity_id: str | None
 
     create_draft: dict[str, Any]
     update_draft: dict[str, Any]

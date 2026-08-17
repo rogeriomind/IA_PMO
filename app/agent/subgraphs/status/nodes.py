@@ -61,7 +61,7 @@ class StatusSubgraph:
 
     async def _show_status_list(self, state: PMOAgentState, *, notice: str | None = None) -> PMOAgentState:
         today = _today(state)
-        project_id = (state.get("metadata") or {}).get("project_id")
+        project_id = _active_project_id(state)
         my_tasks_arguments = await self._my_tasks_arguments(state, project_id=project_id)
         try:
             my_tasks_result, blockers_result = await asyncio.gather(
@@ -253,7 +253,7 @@ class StatusSubgraph:
             }
         task = await self.gateway.execute(
             tool_name="board_get_task",
-            arguments={"id": selected_task_id},
+            arguments={"id": selected_task_id, "project_id": _active_project_id(state)},
             context=_context(state, intent="task.get"),
         )
         task_payload = normalize_task_payload(task.result, fallback_id=selected_task_id)
@@ -331,6 +331,9 @@ def _context(state: PMOAgentState, *, intent: str) -> ToolExecutionContext:
         user_roles=state.get("user_roles") or [],
         intent=intent,
         approval_status="not_required",
+        project_id=_active_project_id(state),
+        channel=state.get("channel"),
+        external_user_id=state.get("user_id"),
     )
 
 
@@ -352,6 +355,10 @@ def _selected_number(state: PMOAgentState) -> int | None:
     if text.isdigit() and state.get("current_flow") == "status":
         return int(text)
     return None
+
+
+def _active_project_id(state: PMOAgentState) -> str | None:
+    return state.get("active_project_id") or (state.get("metadata") or {}).get("project_id")
 
 
 def _selected_task_id(state: PMOAgentState) -> str | None:

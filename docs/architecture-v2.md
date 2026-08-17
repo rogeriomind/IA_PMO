@@ -10,11 +10,13 @@ flowchart TD
   B --> C["Auth + event envelope"]
   C --> D["Lock por tenant_id + thread_id"]
   D --> E["LangGraph main graph"]
-  E --> F["Subgrafo menu"]
-  E --> G["Subgrafo status"]
-  E --> H["Subgrafo criacao"]
-  E --> I["Subgrafo atualizacao"]
-  E --> J["Subgrafo confirmacao"]
+  E --> O["resolve_domain_context"]
+  O --> P["Project Context Resolver"]
+  O --> F["Subgrafo menu"]
+  O --> G["Subgrafo status"]
+  O --> H["Subgrafo criacao"]
+  O --> I["Subgrafo atualizacao"]
+  O --> J["Subgrafo confirmacao"]
   G --> K["MCP Gateway leitura"]
   H --> L["Pending action"]
   I --> L
@@ -35,6 +37,30 @@ Tabelas principais:
 - `agent_events`: replay/idempotencia de `event_id`.
 - `agent_graph_checkpoints`: checkpoint serializavel preparado para LangGraph.
 
+## Domain Context
+
+O V2 usa `PmoContext`/`ToolExecutionContext` para manter a linguagem de dominio alinhada ao Board:
+
+- `tenant_id`: obrigatorio em toda execucao.
+- `project_id`: obrigatorio para tarefas, status, bloqueios e minhas tarefas.
+- `portfolio_id`: opcional, persistido somente quando retornado na resolucao de projeto.
+- `activity_id`: obrigatorio para leitura/alteracao/comentario/movimentacao de atividade.
+
+Depois de `validate_event`, `load_identity` garante o tenant antes de qualquer operacao de dominio. Em seguida, `resolve_domain_context` combina `metadata.project_id`, projeto ativo da sessao e referencia textual do usuario. Quando recebe nome de projeto, o resolver consulta `board_search_projects` se a tool existir. Se houver ambiguidade, o agente pede escolha e nao chama tools globais.
+
+O resumo persistido em `agent_threads.state_summary` guarda apenas identificadores:
+
+```json
+{
+  "active_tenant_id": "tenant-1",
+  "active_project_id": "project-123",
+  "active_portfolio_id": "portfolio-1",
+  "active_activity_id": "activity-9"
+}
+```
+
+Assim, uma conversa pode trocar de projeto explicitamente e as mensagens seguintes usam o ID ativo sem reconsultar o nome como fonte de verdade.
+
 ## MCP Gateway
 
 A v2 reaproveita o gateway existente:
@@ -47,6 +73,21 @@ A v2 reaproveita o gateway existente:
 - idempotencia por operacao;
 - auditoria de tool call;
 - read-after-write apos confirmacao.
+
+Antes de validar a tool, o gateway canonicaliza aliases internos (`id`/`task_id` para `activity_id`, `projectId` para `project_id`) e injeta `tenant_id` e `project_id` vindos do contexto resolvido. Chamadas project-aware sem projeto geram `PROJECT_NOT_FOUND` e nao chegam ao executor MCP.
+
+No boundary `BoardTools`, os payloads enviados ao MCP usam camelCase:
+
+```json
+{
+  "tenantId": "tenant-1",
+  "projectId": "project-123",
+  "activityId": "activity-9",
+  "idempotencyKey": "..."
+}
+```
+
+Writes geram uma `idempotencyKey` deterministica por operacao logica. A chave e separada de `correlation_id`: a correlacao acompanha o trace inteiro, enquanto a idempotencia protege cada mutation (`create`, `update`, `comment`, `move`) contra duplicidade.
 
 Tools permitidas seguem restritas a:
 

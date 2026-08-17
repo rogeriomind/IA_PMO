@@ -65,6 +65,7 @@ async def test_status_list_runs_independent_reads_in_parallel():
             "tenant_id": "tenant-1",
             "user_id": "user-1",
             "user_roles": ["board.read"],
+            "active_project_id": "project-1",
             "metadata": {"timezone": "America/Sao_Paulo"},
         }
     )

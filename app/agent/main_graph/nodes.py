@@ -13,6 +13,7 @@ from app.agent.subgraphs.task_create.nodes import CreateTaskSubgraph
 from app.agent.subgraphs.task_update.nodes import UpdateTaskSubgraph
 from app.agent.subgraphs.welcome.nodes import WelcomeMenuSubgraph
 from app.application.memory_service import MemoryService
+from app.application.project_context_resolver import ProjectContextResolver, ProjectResolutionStatus
 from app.config import Settings
 
 
@@ -28,6 +29,7 @@ class PMOMainGraphNodes:
         update_task: UpdateTaskSubgraph,
         questions: QuestionsSubgraph,
         confirmation: ConfirmationSubgraph,
+        project_resolver: ProjectContextResolver,
     ):
         self.settings = settings
         self.memory = memory
@@ -37,6 +39,7 @@ class PMOMainGraphNodes:
         self.update_task = update_task
         self.questions = questions
         self.confirmation = confirmation
+        self.project_resolver = project_resolver
 
     async def validate_event(self, state: PMOAgentState) -> PMOAgentState:
         text = state.get("message_text") or ""
@@ -54,7 +57,19 @@ class PMOMainGraphNodes:
         return {}
 
     async def load_identity(self, state: PMOAgentState) -> PMOAgentState:
+        if not state.get("tenant_id"):
+            return {
+                "current_flow": state.get("current_flow") or "unknown",
+                "current_step": "tenant_not_found",
+                "final_message": "Nao consegui identificar o tenant desta conversa.",
+                "response_ui": ui_none(),
+                "response_status": "validation_error",
+                "error_code": "TENANT_NOT_FOUND",
+                "error_message": "Tenant context is required before Board operations.",
+                "route": "response_ready",
+            }
         return {
+            "active_tenant_id": state["tenant_id"],
             "user_roles": state.get("user_roles") or [],
             "metadata": state.get("metadata") or {},
             "response_status": state.get("response_status") or "completed",
@@ -81,6 +96,11 @@ class PMOMainGraphNodes:
                 "selected_task_number": summary.get("selected_task_number"),
                 "task_selection_map": summary.get("task_selection_map") or {},
                 "last_ui_context_id": state.get("last_ui_context_id") or summary.get("last_ui_context_id"),
+                "active_tenant_id": summary.get("active_tenant_id") or state.get("tenant_id"),
+                "active_project_id": summary.get("active_project_id"),
+                "active_project_name": summary.get("active_project_name"),
+                "active_portfolio_id": summary.get("active_portfolio_id"),
+                "active_activity_id": summary.get("active_activity_id"),
                 "create_draft": summary.get("create_draft") or {},
                 "update_draft": summary.get("update_draft") or {},
                 "pending_action_id": summary.get("pending_action_id"),
@@ -159,6 +179,91 @@ class PMOMainGraphNodes:
         finally:
             finish_latency_stage("routing")
 
+    async def resolve_domain_context(self, state: PMOAgentState) -> PMOAgentState:
+        if state.get("route") == "response_ready":
+            return {}
+
+        route = state.get("route") or "welcome"
+        metadata = state.get("metadata") or {}
+        session = {
+            "active_project_id": state.get("active_project_id"),
+            "active_project_name": state.get("active_project_name"),
+            "active_portfolio_id": state.get("active_portfolio_id"),
+            "active_activity_id": state.get("active_activity_id"),
+        }
+        require_project = route in {"status", "create", "task_create", "update", "task_update"}
+        resolution = await self.project_resolver.resolve(
+            tenant_id=state["tenant_id"],
+            user_id=state["user_id"],
+            session=session,
+            entities={},
+            metadata=metadata,
+            message_text=state.get("message_text"),
+            require_project=require_project,
+        )
+
+        if resolution.status == ProjectResolutionStatus.RESOLVED and resolution.project_id:
+            project_metadata = {**metadata, "project_id": resolution.project_id}
+            updates: PMOAgentState = {
+                "active_tenant_id": state["tenant_id"],
+                "active_project_id": resolution.project_id,
+                "active_project_name": resolution.project_name or state.get("active_project_name"),
+                "active_portfolio_id": resolution.portfolio_id or state.get("active_portfolio_id"),
+                "metadata": project_metadata,
+            }
+            if route == "welcome" and resolution.reference:
+                label = resolution.project_name or resolution.project_id
+                updates.update(
+                    {
+                        "current_flow": "main_menu",
+                        "current_step": "waiting_menu_selection",
+                        "final_message": f"Projeto ativo atualizado para {label}.",
+                        "response_ui": inline_keyboard(
+                            [
+                                {"id": "menu_status", "label": "Status", "callback_data": "menu:status"},
+                                {"id": "menu_create", "label": "Criar atividade", "callback_data": "menu:create"},
+                                {"id": "menu_update", "label": "Atualizar atividade", "callback_data": "menu:update"},
+                            ]
+                        ),
+                        "response_status": "waiting_user_input",
+                        "route": "response_ready",
+                    }
+                )
+            return updates
+
+        if resolution.status == ProjectResolutionStatus.AMBIGUOUS:
+            options_text = "\n".join(
+                f"- {candidate.name or candidate.project_id} ({candidate.project_id})"
+                for candidate in resolution.candidates[:5]
+            )
+            return {
+                "current_flow": "main_menu",
+                "current_step": "project_ambiguous",
+                "final_message": (
+                    "Encontrei mais de um projeto com esse nome. Qual deles voce quer usar?\n\n"
+                    f"{options_text}"
+                ),
+                "response_ui": ui_none(),
+                "response_status": "waiting_user_input",
+                "error_code": "PROJECT_AMBIGUOUS",
+                "route": "response_ready",
+            }
+
+        if resolution.status == ProjectResolutionStatus.NOT_FOUND and (require_project or resolution.reference):
+            return {
+                "current_flow": route,
+                "current_step": "project_not_found",
+                "final_message": "Preciso saber em qual projeto voce quer trabalhar.",
+                "response_ui": inline_keyboard(
+                    [{"id": "global_menu", "label": "Voltar ao menu", "callback_data": "global:menu"}]
+                ),
+                "response_status": "waiting_user_input",
+                "error_code": "PROJECT_NOT_FOUND",
+                "route": "response_ready",
+            }
+
+        return {"active_tenant_id": state["tenant_id"]}
+
     async def route_to_subgraph(self, state: PMOAgentState) -> PMOAgentState:
         if state.get("route") == "response_ready":
             return {}
@@ -198,6 +303,11 @@ class PMOMainGraphNodes:
             "selected_task_number": state.get("selected_task_number"),
             "task_selection_map": state.get("task_selection_map") or {},
             "last_ui_context_id": response_ui.get("context_id") or state.get("last_ui_context_id"),
+            "active_tenant_id": state.get("active_tenant_id") or state.get("tenant_id"),
+            "active_project_id": state.get("active_project_id"),
+            "active_project_name": state.get("active_project_name"),
+            "active_portfolio_id": state.get("active_portfolio_id"),
+            "active_activity_id": state.get("active_activity_id"),
             "create_draft": state.get("create_draft") or {},
             "update_draft": state.get("update_draft") or {},
             "pending_action_id": state.get("pending_action_id"),

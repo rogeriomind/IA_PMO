@@ -76,7 +76,7 @@ class CreateTaskSubgraph:
             )
             draft = _merge_draft(draft, extraction.model_dump(exclude_none=True))
 
-        project_id = (state.get("metadata") or {}).get("project_id") or draft.get("project_id")
+        project_id = _active_project_id(state) or draft.get("project_id")
         if project_id:
             draft["project_id"] = project_id
 
@@ -268,6 +268,10 @@ def _merge_draft(draft: dict[str, Any], extracted: dict[str, Any]) -> dict[str, 
         if value not in (None, "", {}, []):
             merged[key] = value
     return merged
+
+
+def _active_project_id(state: PMOAgentState) -> str | None:
+    return state.get("active_project_id") or (state.get("metadata") or {}).get("project_id")
 
 
 def _looks_like_date_only(text: str) -> bool:

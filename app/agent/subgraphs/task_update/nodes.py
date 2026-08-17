@@ -120,7 +120,7 @@ class UpdateTaskSubgraph:
         }
 
     async def _list_tasks(self, state: PMOAgentState, *, page: int = 1) -> PMOAgentState:
-        project_id = (state.get("metadata") or {}).get("project_id")
+        project_id = _active_project_id(state)
         arguments = await self._my_tasks_arguments(state, project_id=project_id)
         try:
             result = await self.gateway.execute(
@@ -241,7 +241,7 @@ class UpdateTaskSubgraph:
     async def _search_task(self, state: PMOAgentState, query: str) -> PMOAgentState:
         result = await self.gateway.execute(
             tool_name="board_search_tasks",
-            arguments={"search": query, "project_id": (state.get("metadata") or {}).get("project_id")},
+            arguments={"search": query, "project_id": _active_project_id(state)},
             context=_context(state, intent="task.search"),
         )
         tasks = extract_tasks(result.result)
@@ -283,7 +283,7 @@ class UpdateTaskSubgraph:
     async def _select_task_id(self, state: PMOAgentState, selected_task_id: str) -> PMOAgentState:
         task = await self.gateway.execute(
             tool_name="board_get_task",
-            arguments={"id": selected_task_id},
+            arguments={"id": selected_task_id, "project_id": _active_project_id(state)},
             context=_context(state, intent="task.get"),
         )
         task_payload = normalize_task_payload(task.result, fallback_id=selected_task_id)
@@ -414,7 +414,11 @@ class UpdateTaskSubgraph:
                 {
                     "tool_name": "board_update_task",
                     "intent": "task.update",
-                    "arguments": {"task_id": selected_task_id, "fields": allowed_fields},
+                    "arguments": {
+                        "task_id": selected_task_id,
+                        "project_id": _active_project_id(state),
+                        "fields": allowed_fields,
+                    },
                 }
             )
         if comment:
@@ -422,7 +426,11 @@ class UpdateTaskSubgraph:
                 {
                     "tool_name": "board_add_comment",
                     "intent": "task.comment",
-                    "arguments": {"task_id": selected_task_id, "comment": comment},
+                    "arguments": {
+                        "task_id": selected_task_id,
+                        "project_id": _active_project_id(state),
+                        "comment": comment,
+                    },
                 }
             )
         preview = {
@@ -588,7 +596,7 @@ class UpdateTaskSubgraph:
         try:
             task = await self.gateway.execute(
                 tool_name="board_get_task",
-                arguments={"id": selected_task_id},
+                arguments={"id": selected_task_id, "project_id": _active_project_id(state)},
                 context=_context(state, intent="task.get"),
             )
             return normalize_task_payload(task.result, fallback_id=selected_task_id)
@@ -608,7 +616,14 @@ def _context(state: PMOAgentState, *, intent: str) -> ToolExecutionContext:
         user_roles=state.get("user_roles") or [],
         intent=intent,
         approval_status="not_required",
+        project_id=_active_project_id(state),
+        channel=state.get("channel"),
+        external_user_id=state.get("user_id"),
     )
+
+
+def _active_project_id(state: PMOAgentState) -> str | None:
+    return state.get("active_project_id") or (state.get("metadata") or {}).get("project_id")
 
 
 def _preview_message(preview: dict[str, Any]) -> str:

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import time
+from dataclasses import replace
 from typing import Any, Protocol
 
 from pydantic import ValidationError
@@ -17,6 +19,8 @@ from app.agent.errors import (
     MCPPermanentError,
     MCPTimeoutError,
     MCPTransientError,
+    ProjectContextMissingError,
+    TenantContextMissingError,
     ToolNotAllowedError,
     ToolValidationError,
 )
@@ -27,6 +31,26 @@ from app.mcp.board_tools import BoardTools
 from app.storage.repository import PendingActionRepository
 
 logger = logging.getLogger(__name__)
+
+
+PROJECT_SCOPED_TOOLS = {
+    "board_search_tasks",
+    "board_get_task",
+    "board_create_task",
+    "board_update_task",
+    "board_move_task",
+    "board_add_comment",
+    "board_get_project_status",
+    "board_list_blockers",
+    "board_list_my_tasks",
+}
+
+ACTIVITY_SCOPED_TOOLS = {
+    "board_get_task",
+    "board_update_task",
+    "board_move_task",
+    "board_add_comment",
+}
 
 
 class MCPExecutor(Protocol):
@@ -44,6 +68,14 @@ class BoardToolsExecutor:
     def __init__(self, board_tools: BoardTools):
         self.board_tools = board_tools
 
+    async def _call(self, method_name: str, **kwargs: Any) -> Any:
+        method = getattr(self.board_tools, method_name)
+        parameters = inspect.signature(method).parameters
+        if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
+            return await method(**kwargs)
+        accepted = {key: value for key, value in kwargs.items() if key in parameters}
+        return await method(**accepted)
+
     async def execute(
         self,
         tool_name: str,
@@ -51,62 +83,97 @@ class BoardToolsExecutor:
         *,
         idempotency_key: str | None = None,
     ) -> Any:
+        tenant_id = arguments.get("tenant_id")
+        project_id = arguments.get("project_id")
+        activity_id = arguments.get("activity_id")
         if tool_name == "board_search_tasks":
-            return await self.board_tools.search_tasks(
+            return await self._call(
+                "search_tasks",
+                tenant_id=tenant_id,
+                project_id=project_id,
                 query=arguments.get("search") or arguments.get("query") or "",
-                project_id=arguments.get("project_id"),
+                limit=arguments.get("limit"),
             )
         if tool_name == "board_get_task":
-            task_id = arguments.get("id") or arguments.get("task_id")
-            return await self.board_tools.get_task(task_id=task_id)
+            return await self._call(
+                "get_task",
+                tenant_id=tenant_id,
+                project_id=project_id,
+                activity_id=activity_id,
+                task_id=activity_id,
+            )
         if tool_name == "board_search_users":
-            return await self.board_tools.search_users(
+            return await self._call(
+                "search_users",
+                tenant_id=tenant_id,
                 query=arguments.get("query"),
                 limit=arguments.get("limit") or 20,
+                project_id=project_id,
             )
         if tool_name == "board_create_task":
-            return await self.board_tools.create_task(arguments, idempotency_key=idempotency_key)
+            return await self._call(
+                "create_task",
+                tenant_id=tenant_id,
+                project_id=project_id,
+                payload=arguments,
+                idempotency_key=idempotency_key,
+            )
         if tool_name == "board_update_task":
-            return await self.board_tools.update_task(
-                task_id=arguments.get("task_id") or arguments.get("id"),
+            return await self._call(
+                "update_task",
+                tenant_id=tenant_id,
+                project_id=project_id,
+                activity_id=activity_id,
+                task_id=activity_id,
                 task_query=arguments.get("task_query"),
                 fields=arguments.get("fields") or {},
                 idempotency_key=idempotency_key,
             )
         if tool_name == "board_move_task":
-            return await self.board_tools.move_task(
-                task_id=arguments.get("task_id") or arguments.get("id"),
+            return await self._call(
+                "move_task",
+                tenant_id=tenant_id,
+                project_id=project_id,
+                activity_id=activity_id,
+                task_id=activity_id,
                 task_query=arguments.get("task_query"),
                 status=arguments.get("status"),
                 idempotency_key=idempotency_key,
             )
         if tool_name == "board_add_comment":
-            return await self.board_tools.add_comment(
-                task_id=arguments.get("task_id") or arguments.get("id"),
+            return await self._call(
+                "add_comment",
+                tenant_id=tenant_id,
+                project_id=project_id,
+                activity_id=activity_id,
+                task_id=activity_id,
                 task_query=arguments.get("task_query"),
                 comment=arguments.get("comment"),
                 idempotency_key=idempotency_key,
             )
         if tool_name == "board_get_project_status":
-            return await self.board_tools.get_project_status(
-                project_id=arguments.get("project_id"),
-                query=arguments.get("query"),
+            return await self._call(
+                "get_project_status",
+                tenant_id=tenant_id,
+                project_id=project_id,
             )
         if tool_name == "board_list_blockers":
-            return await self.board_tools.list_blockers(project_id=arguments.get("project_id"))
+            return await self._call(
+                "list_blockers",
+                tenant_id=tenant_id,
+                project_id=project_id,
+                assignee_id=arguments.get("assigneeId"),
+            )
         if tool_name == "board_list_my_tasks":
-            try:
-                return await self.board_tools.list_my_tasks(
-                    user_id=arguments.get("user_id"),
-                    project_id=arguments.get("project_id"),
-                    assignee_id=arguments.get("assigneeId"),
-                    assignee_email=arguments.get("assigneeEmail"),
-                )
-            except TypeError:
-                return await self.board_tools.list_my_tasks(
-                    user_id=arguments.get("user_id") or arguments.get("assigneeId") or "",
-                    project_id=arguments.get("project_id"),
-                )
+            return await self._call(
+                "list_my_tasks",
+                tenant_id=tenant_id,
+                user_id=arguments.get("user_id"),
+                project_id=project_id,
+                assignee_id=arguments.get("assigneeId"),
+                assignee_email=arguments.get("assigneeEmail"),
+                include_completed=arguments.get("includeCompleted"),
+            )
         raise ToolNotAllowedError(f"Unknown board tool: {tool_name}")
 
 
@@ -167,15 +234,21 @@ class MCPGateway:
         context: ToolExecutionContext,
     ) -> ToolExecutionResult:
         spec = self._get_allowed_spec(tool_name, context)
-        validated = self._validate_arguments(spec, arguments)
-        self._authorize(spec, context)
+        prepared = self._prepare_arguments(spec, arguments, context)
+        validated = self._validate_arguments(spec, prepared)
+        execution_context = replace(
+            context,
+            project_id=validated.get("project_id") or context.project_id,
+            activity_id=validated.get("activity_id") or context.activity_id,
+        )
+        self._authorize(spec, execution_context)
 
-        if spec.requires_confirmation and context.approval_status != "approved":
+        if spec.requires_confirmation and execution_context.approval_status != "approved":
             raise ConfirmationRequiredError()
 
         if spec.type == "write":
-            return await self._execute_write(spec, validated, context)
-        return await self._execute_read(spec, validated, context)
+            return await self._execute_write(spec, validated, execution_context)
+        return await self._execute_read(spec, validated, execution_context)
 
     def _get_allowed_spec(self, tool_name: str, context: ToolExecutionContext) -> ToolSpec:
         if not self.registry.has(tool_name):
@@ -193,6 +266,62 @@ class MCPGateway:
             return spec.input_model.model_validate(arguments).model_dump(exclude_none=True)
         except ValidationError as exc:
             raise ToolValidationError(str(exc)) from exc
+
+    def _prepare_arguments(
+        self,
+        spec: ToolSpec,
+        arguments: dict[str, Any],
+        context: ToolExecutionContext,
+    ) -> dict[str, Any]:
+        if not context.tenant_id:
+            raise TenantContextMissingError()
+
+        prepared = self._canonicalize_arguments(arguments)
+        if spec.name == "board_search_tasks" and not prepared.get("search") and "query" in prepared:
+            prepared["search"] = prepared["query"]
+        prepared["tenant_id"] = prepared.get("tenant_id") or context.tenant_id
+
+        project_id = prepared.get("project_id") or context.project_id
+        if spec.name in PROJECT_SCOPED_TOOLS:
+            if not project_id:
+                raise ProjectContextMissingError()
+            prepared["project_id"] = project_id
+
+        activity_id = prepared.get("activity_id") or context.activity_id
+        if spec.name in ACTIVITY_SCOPED_TOOLS and activity_id:
+            prepared["activity_id"] = activity_id
+
+        allowed_keys = self._allowed_input_keys(spec)
+        return {key: value for key, value in prepared.items() if key in allowed_keys}
+
+    @staticmethod
+    def _allowed_input_keys(spec: ToolSpec) -> set[str]:
+        keys: set[str] = set()
+        for name, field in spec.input_model.model_fields.items():
+            keys.add(name)
+            if field.alias:
+                keys.add(field.alias)
+        return keys
+
+    @staticmethod
+    def _canonicalize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+        prepared: dict[str, Any] = {}
+        for key, value in (arguments or {}).items():
+            canonical = {
+                "tenantId": "tenant_id",
+                "projectId": "project_id",
+                "project": "project_id",
+                "activityId": "activity_id",
+                "task_id": "activity_id",
+                "id": "activity_id",
+                "idempotencyKey": "idempotency_key",
+                "assignee_id": "assigneeId",
+                "assignee_email": "assigneeEmail",
+                "include_completed": "includeCompleted",
+            }.get(key, key)
+            if canonical not in prepared or prepared.get(canonical) in (None, "", {}, []):
+                prepared[canonical] = value
+        return prepared
 
     @staticmethod
     def _authorize(spec: ToolSpec, context: ToolExecutionContext) -> None:
@@ -309,13 +438,16 @@ class MCPGateway:
         arguments: dict[str, Any],
         context: ToolExecutionContext,
     ) -> ToolExecutionResult:
-        idempotency_key = context.idempotency_key or self.build_idempotency_key(
+        logical_arguments = self._arguments_without_idempotency(arguments)
+        idempotency_key = context.idempotency_key or arguments.get("idempotency_key") or self.build_idempotency_key(
             tenant_id=context.tenant_id,
             request_id=context.request_id,
             tool_name=spec.name,
-            arguments=arguments,
+            arguments=logical_arguments,
         )
-        arguments_hash = self.arguments_hash(arguments)
+        context = replace(context, idempotency_key=idempotency_key)
+        call_arguments = {**logical_arguments, "idempotency_key": idempotency_key}
+        arguments_hash = self.arguments_hash(logical_arguments)
         existing = self.repository.get_idempotency_record(idempotency_key)
         if existing:
             if existing["arguments_hash"] != arguments_hash:
@@ -344,7 +476,7 @@ class MCPGateway:
             result = await asyncio.wait_for(
                 self.executor.execute(
                     spec.mcp_tool_name,
-                    arguments,
+                    call_arguments,
                     idempotency_key=idempotency_key,
                 ),
                 timeout=spec.timeout_seconds,
@@ -367,7 +499,7 @@ class MCPGateway:
             self._audit(
                 spec,
                 context,
-                arguments,
+                call_arguments,
                 "success",
                 latency_ms,
                 limited,
@@ -400,7 +532,7 @@ class MCPGateway:
             self._audit(
                 spec,
                 context,
-                arguments,
+                call_arguments,
                 "timeout",
                 latency_ms,
                 None,
@@ -428,7 +560,7 @@ class MCPGateway:
             self._audit(
                 spec,
                 context,
-                arguments,
+                call_arguments,
                 "error",
                 latency_ms,
                 None,
@@ -443,6 +575,14 @@ class MCPGateway:
         raw = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _arguments_without_idempotency(arguments: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in arguments.items()
+            if key not in {"idempotency_key", "idempotencyKey"}
+        }
+
     @classmethod
     def build_idempotency_key(
         cls,
@@ -453,13 +593,15 @@ class MCPGateway:
         arguments: dict[str, Any],
     ) -> str:
         entity_id = (
-            arguments.get("id")
+            arguments.get("activity_id")
+            or arguments.get("activityId")
+            or arguments.get("id")
             or arguments.get("task_id")
             or arguments.get("task_query")
             or arguments.get("title")
             or "none"
         )
-        payload_hash = cls.arguments_hash(arguments)
+        payload_hash = cls.arguments_hash(cls._arguments_without_idempotency(arguments))
         raw = f"{tenant_id}:{request_id}:{tool_name}:{entity_id}:{payload_hash}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -531,6 +673,8 @@ class MCPGateway:
                 "api_version": context.api_version,
                 "thread_id": context.thread_id,
                 "tenant_id": context.tenant_id,
+                "project_id": context.project_id,
+                "activity_id": context.activity_id,
                 "user_id": context.user_id,
                 "intent": context.intent,
                 "tool_name": spec.name,
@@ -541,6 +685,7 @@ class MCPGateway:
                 "retry_count": retry_count,
                 "transport": transport,
                 "error_code": error_code,
+                "idempotency_key_hash": _hash_for_logs(context.idempotency_key),
             },
         )
 
@@ -571,3 +716,9 @@ class MCPGateway:
 
     def _record_success(self, tool_name: str) -> None:
         self._failure_counts.pop(tool_name, None)
+
+
+def _hash_for_logs(value: str | None) -> str | None:
+    if not value:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]

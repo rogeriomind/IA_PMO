@@ -56,7 +56,36 @@ class IdempotencyConflictError(AgentError):
     user_message = "Esta acao ja foi processada com outros dados."
 
 
+class TenantContextMissingError(AgentError):
+    code = "TENANT_NOT_FOUND"
+    user_message = "Nao consegui identificar o tenant desta conversa."
+
+
+class ProjectContextMissingError(AgentError):
+    code = "PROJECT_NOT_FOUND"
+    user_message = "Preciso saber em qual projeto voce quer trabalhar."
+
+
+class ProjectContextAmbiguousError(AgentError):
+    code = "PROJECT_AMBIGUOUS"
+    user_message = "Encontrei mais de um projeto com essa referencia. Qual deles voce quer usar?"
+
+
+class ProjectAccessDeniedError(AgentError):
+    code = "PROJECT_ACCESS_DENIED"
+    user_message = "Voce nao tem acesso a esse projeto."
+
+
+class ActivityProjectMismatchError(AgentError):
+    code = "ACTIVITY_NOT_IN_PROJECT"
+    user_message = "Essa atividade nao pertence ao projeto ativo."
+
+
+class BoardContractError(AgentError):
+    code = "BOARD_CONTRACT_ERROR"
+    user_message = "Nao consegui montar uma chamada valida para o Board."
+
+
 class ThreadLockedError(AgentError):
     code = "THREAD_LOCKED"
     user_message = "Esta conversa ja esta sendo processada. Tente novamente em instantes."
-

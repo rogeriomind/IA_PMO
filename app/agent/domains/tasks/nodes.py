@@ -28,7 +28,7 @@ class TaskQueryNodes:
         metadata = state.get("metadata") or {}
         project_id = entities.get("project_id") or metadata.get("project_id") or metadata.get("projectId")
         if intent == "task.get":
-            tool_input = {"id": entities.get("task_id") or entities.get("id")}
+            tool_input = {"id": entities.get("task_id") or entities.get("id"), "project_id": project_id}
         elif intent == "user.my_tasks":
             tool_input = {"user_id": state["user_id"], "project_id": project_id}
         else:
@@ -95,18 +95,21 @@ class TaskWriteNodes:
             tool_input = {
                 "task_id": entities.get("task_id"),
                 "task_query": entities.get("task_query"),
+                "project_id": project,
                 "fields": fields,
             }
         elif intent == "task.move":
             tool_input = {
                 "task_id": entities.get("task_id"),
                 "task_query": entities.get("task_query"),
+                "project_id": project,
                 "status": normalize_status(entities.get("status")) if entities.get("status") else None,
             }
         else:
             tool_input = {
                 "task_id": entities.get("task_id"),
                 "task_query": entities.get("task_query"),
+                "project_id": project,
                 "comment": entities.get("comment"),
             }
 
@@ -142,7 +145,7 @@ class TaskWriteNodes:
         try:
             result = await self.gateway.execute(
                 tool_name="board_get_task",
-                arguments={"id": task_id},
+                arguments={"id": task_id, "project_id": data.get("project_id") or data.get("project")},
                 context=_context(state, intent="task.get", approval_status="not_required"),
             )
             return {"data": {"current_task": result.result}}
@@ -219,7 +222,7 @@ class TaskWriteNodes:
         try:
             read_result = await self.gateway.execute(
                 tool_name="board_get_task",
-                arguments={"id": task_id},
+                arguments={"id": task_id, "project_id": data.get("project_id") or data.get("project")},
                 context=_context(state, intent="task.get", approval_status="not_required"),
             )
             return {"read_after_write_result": read_result.result}
@@ -264,6 +267,20 @@ def _context(
         intent=intent or state.get("intent", "unknown"),
         approval_status=approval_status,
         idempotency_key=idempotency_key,
+        project_id=_project_id(state),
+        channel=state.get("channel"),
+        external_user_id=state.get("user_id"),
+    )
+
+
+def _project_id(state: AgentState) -> str | None:
+    tool_input = state.get("tool_input") or {}
+    metadata = state.get("metadata") or {}
+    return (
+        tool_input.get("project_id")
+        or tool_input.get("project")
+        or metadata.get("project_id")
+        or metadata.get("projectId")
     )
 
 

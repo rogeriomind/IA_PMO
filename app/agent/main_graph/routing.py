@@ -51,7 +51,7 @@ def infer_menu_from_text(text: str | None) -> str | None:
     normalized = plain(text)
     if not normalized:
         return None
-    if re.search(r"\b(status|minhas tarefas|atividades de hoje|atrasadas|bloqueadas)\b", normalized):
+    if re.search(r"\b(status|minhas tarefas|meu trabalho|atividades de hoje|atrasadas|bloquead[ao]s?|bloqueios?)\b", normalized):
         return "status"
     if re.search(r"\b(criar|cria|nova atividade|nova tarefa|abrir atividade)\b", normalized):
         return "create"

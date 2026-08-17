@@ -145,6 +145,7 @@ class AgentWorkflowService:
         tool_input = payload.get("tool_input") or {}
         intent = payload.get("intent") or _intent_for_tool(tool_name)
         original_request_id = payload.get("request_id") or request_id
+        project_id = tool_input.get("project_id") or tool_input.get("projectId")
         idempotency_key = self.gateway.build_idempotency_key(
             tenant_id=tenant_id,
             request_id=original_request_id,
@@ -167,6 +168,8 @@ class AgentWorkflowService:
                     intent=intent,
                     approval_status="approved",
                     idempotency_key=idempotency_key,
+                    project_id=project_id,
+                    activity_id=tool_input.get("task_id") or tool_input.get("id") or tool_input.get("activity_id"),
                 ),
             )
             read_after_write = await self._read_after_write(
@@ -219,15 +222,17 @@ class AgentWorkflowService:
         tool_input: dict[str, Any],
         tool_result: Any,
     ) -> Any | None:
-        task_id = tool_input.get("task_id") or tool_input.get("id")
+        project_id = tool_input.get("project_id") or tool_input.get("projectId")
+        task_id = tool_input.get("task_id") or tool_input.get("id") or tool_input.get("activity_id")
         if not task_id and isinstance(tool_result, dict):
             task_id = tool_result.get("id") or tool_result.get("task_id")
+            project_id = project_id or tool_result.get("project_id") or tool_result.get("projectId")
         if not task_id:
             return None
         try:
             read = await self.gateway.execute(
                 tool_name="board_get_task",
-                arguments={"id": task_id},
+                arguments={"id": task_id, "project_id": project_id},
                 context=ToolExecutionContext(
                     request_id=request_id,
                     correlation_id=correlation_id,
@@ -238,6 +243,8 @@ class AgentWorkflowService:
                     user_roles=user_roles,
                     intent="task.get",
                     approval_status="not_required",
+                    project_id=project_id,
+                    activity_id=task_id,
                 ),
             )
             return read.result

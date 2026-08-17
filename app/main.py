@@ -32,6 +32,7 @@ from app.application.assignee_resolver import AssigneeResolver
 from app.application.confirmation_service import AgentConfirmationService as AgentV2ConfirmationService
 from app.application.draft_service import DraftService
 from app.application.memory_service import MemoryService
+from app.application.project_context_resolver import ProjectContextResolver
 from app.application.task_selection_service import TaskSelectionService
 from app.api.deprecation import add_legacy_agent_deprecation_headers
 from app.api.middleware import install_correlation_middleware
@@ -194,6 +195,7 @@ def create_app(
         draft_service = DraftService(repository, app_settings)
         extraction_service = TaskExtractionService(app_settings, tracer=tracer)
         assignee_resolver = AssigneeResolver(board_tools=board_tools, repository=repository)
+        project_resolver = ProjectContextResolver(board_tools=board_tools)
         v2_confirmation_service = AgentV2ConfirmationService(repository, gateway)
         welcome_subgraph = WelcomeMenuSubgraph()
         status_subgraph = StatusSubgraph(
@@ -232,6 +234,7 @@ def create_app(
             update_task=update_subgraph,
             questions=QuestionsSubgraph(),
             confirmation=confirmation_subgraph,
+            project_resolver=project_resolver,
         )
         v2_graph = build_pmo_agent_graph(v2_nodes)
         v2_locks = (

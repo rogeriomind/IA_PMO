@@ -40,26 +40,72 @@ class FakeBoardToolsV2:
                 "priority": "LOW",
             },
         }
+        self.read_calls = []
         self.write_calls = []
         self.users = [
             {"id": ROGERIO_ID, "name": "Rogerio", "email": "rogerio@pmo.local", "avatarUrl": None},
             {"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "name": "Ana", "email": "ana@pmo.local", "avatarUrl": None},
         ]
 
-    async def search_tasks(self, query: str, project_id: str | None = None):
+    async def search_projects(self, tenant_id: str, query: str, limit: int = 10):
+        self.read_calls.append(("search_projects", tenant_id, query))
+        projects = [
+            {"projectId": "consorcio", "name": "Consórcio", "portfolio": {"id": "portfolio-1"}},
+            {"projectId": "fianca", "name": "Fiança", "portfolio": {"id": "portfolio-1"}},
+            {"projectId": "crm-a", "name": "CRM", "portfolio": {"id": "portfolio-a"}},
+            {"projectId": "crm-b", "name": "CRM", "portfolio": {"id": "portfolio-b"}},
+        ]
+        normalized = query.casefold().replace("ó", "o").replace("ç", "c").replace("ã", "a")
+        return {
+            "projects": [
+                project
+                for project in projects
+                if normalized in project["name"].casefold().replace("ó", "o").replace("ç", "c").replace("ã", "a")
+            ][:limit]
+        }
+
+    async def search_tasks(
+        self,
+        tenant_id: str | None = None,
+        query: str = "",
+        project_id: str | None = None,
+    ):
+        self.read_calls.append(("search_tasks", tenant_id, project_id, query))
         return [task for task in self.tasks.values() if query.casefold() in task["title"].casefold()]
 
-    async def get_task(self, task_id: str):
+    async def get_task(
+        self,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        activity_id: str | None = None,
+        task_id: str | None = None,
+    ):
+        task_id = activity_id or task_id
+        self.read_calls.append(("get_task", tenant_id, project_id, task_id))
         task = self.tasks.get(task_id, {"id": task_id, "title": f"Tarefa {task_id}", "due_date": None})
         return {"task": task}
 
-    async def get_project_status(self, project_id: str | None = None, query: str | None = None):
+    async def get_project_status(self, tenant_id: str | None = None, project_id: str | None = None):
+        self.read_calls.append(("project_status", tenant_id, project_id))
         return {"status": "ok"}
 
-    async def list_blockers(self, project_id: str | None = None):
+    async def list_blockers(
+        self,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        assignee_id: str | None = None,
+    ):
+        self.read_calls.append(("blockers", tenant_id, project_id, assignee_id))
         return [self.tasks["TASK-BLOCK"]]
 
-    async def search_users(self, query: str | None = None, limit: int = 20):
+    async def search_users(
+        self,
+        tenant_id: str | None = None,
+        query: str | None = None,
+        limit: int = 20,
+        project_id: str | None = None,
+    ):
+        self.read_calls.append(("users", tenant_id, project_id, query))
         if not query:
             return {"users": self.users[:limit]}
         normalized = query.casefold().replace("é", "e")
@@ -73,32 +119,38 @@ class FakeBoardToolsV2:
 
     async def list_my_tasks(
         self,
+        tenant_id: str | None = None,
         user_id: str | None = None,
         project_id: str | None = None,
         assignee_id: str | None = None,
         assignee_email: str | None = None,
+        include_completed: bool | None = None,
     ):
+        self.read_calls.append(("my_tasks", tenant_id, project_id, assignee_id, assignee_email, include_completed))
         return list(self.tasks.values())
 
-    async def create_task(self, payload, idempotency_key=None):
+    async def create_task(self, payload, tenant_id=None, project_id=None, idempotency_key=None):
         self.write_calls.append(("create", payload, idempotency_key))
         created = {"id": "TASK-NEW", **payload}
         self.tasks["TASK-NEW"] = created
         return created
 
-    async def update_task(self, *, task_id, fields, task_query=None, idempotency_key=None):
-        self.write_calls.append(("update", task_id, fields, task_query, idempotency_key))
+    async def update_task(self, *, tenant_id=None, project_id=None, activity_id=None, task_id=None, fields, task_query=None, idempotency_key=None):
+        task_id = activity_id or task_id
+        self.write_calls.append(("update", tenant_id, project_id, task_id, fields, task_query, idempotency_key))
         self.tasks.setdefault(task_id, {"id": task_id, "title": task_id}).update(fields)
         return self.tasks[task_id]
 
-    async def move_task(self, *, task_id, status, task_query=None, idempotency_key=None):
-        self.write_calls.append(("move", task_id, status, task_query, idempotency_key))
+    async def move_task(self, *, tenant_id=None, project_id=None, activity_id=None, task_id=None, status, task_query=None, idempotency_key=None):
+        task_id = activity_id or task_id
+        self.write_calls.append(("move", tenant_id, project_id, task_id, status, task_query, idempotency_key))
         self.tasks.setdefault(task_id, {"id": task_id, "title": task_id})["status"] = status
         return self.tasks[task_id]
 
-    async def add_comment(self, *, task_id, comment, task_query=None, idempotency_key=None):
-        self.write_calls.append(("comment", task_id, comment, task_query, idempotency_key))
-        return {"id": task_id, "comment": comment}
+    async def add_comment(self, *, tenant_id=None, project_id=None, activity_id=None, task_id=None, comment, task_query=None, idempotency_key=None):
+        task_id = activity_id or task_id
+        self.write_calls.append(("comment", tenant_id, project_id, task_id, comment, task_query, idempotency_key))
+        return {"id": task_id, "project_id": project_id, "comment": comment}
 
 
 @pytest.fixture()
@@ -154,7 +206,17 @@ def _headers_without_roles():
     return headers
 
 
-def _event(event_id: str, message_type: str, *, text: str | None = None, callback_data: str | None = None):
+def _event(
+    event_id: str,
+    message_type: str,
+    *,
+    text: str | None = None,
+    callback_data: str | None = None,
+    project_id: str | None = "pmo",
+):
+    metadata = {"chat_id": "123", "message_id": event_id, "timezone": "America/Sao_Paulo"}
+    if project_id is not None:
+        metadata["project_id"] = project_id
     return {
         "event_id": event_id,
         "request_id": f"req-{event_id}",
@@ -165,7 +227,7 @@ def _event(event_id: str, message_type: str, *, text: str | None = None, callbac
         "message_type": message_type,
         "user": {"id": "u1", "name": "Rogerio", "username": "rogerio"},
         "content": {"text": text, "callback_data": callback_data},
-        "metadata": {"chat_id": "123", "message_id": event_id, "project_id": "pmo", "timezone": "America/Sao_Paulo"},
+        "metadata": metadata,
     }
 
 
@@ -254,6 +316,52 @@ def test_v2_status_lists_tasks_and_status_selection_enters_update(client):
     assert update["flow"] == "task_update"
     assert update["status"] == "waiting_user_input"
     assert client.app.state.agent_metrics.counters["mcp_calls_total:api_version=v2"] >= 3
+
+
+def test_v2_project_context_persists_and_status_uses_active_project(client):
+    switch = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("project-context-1", "text", text="Vamos trabalhar no projeto Consórcio.", project_id=None),
+    ).json()
+
+    assert switch["status"] == "waiting_user_input"
+    assert "Projeto ativo atualizado" in switch["message"]
+
+    client.fake_tools.read_calls.clear()
+    status = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("project-context-2", "menu_selection", callback_data="menu:status", project_id=None),
+    ).json()
+
+    assert status["flow"] == "status"
+    assert ("my_tasks", "default", "consorcio", ROGERIO_ID, None, None) in client.fake_tools.read_calls
+    assert ("blockers", "default", "consorcio", None) in client.fake_tools.read_calls
+
+
+def test_v2_status_without_project_does_not_query_global_board(client):
+    response = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("project-missing-1", "menu_selection", callback_data="menu:status", project_id=None),
+    ).json()
+
+    assert response["status"] == "waiting_user_input"
+    assert response["error"]["code"] == "PROJECT_NOT_FOUND"
+    assert not any(call[0] in {"my_tasks", "blockers"} for call in client.fake_tools.read_calls)
+
+
+def test_v2_ambiguous_project_reference_asks_for_clarification(client):
+    response = client.post(
+        "/v2/agent/events",
+        headers=_headers(),
+        json=_event("project-ambiguous-1", "text", text="Agora projeto CRM", project_id=None),
+    ).json()
+
+    assert response["status"] == "waiting_user_input"
+    assert response["error"]["code"] == "PROJECT_AMBIGUOUS"
+    assert "mais de um projeto" in response["message"].casefold()
 
 
 def test_v2_greeting_and_explicit_intent_override_sticky_status_flow(client):

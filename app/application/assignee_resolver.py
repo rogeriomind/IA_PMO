@@ -48,7 +48,7 @@ class AssigneeResolver:
                 email=link.get("board_user_email"),
             )
 
-        users = await self._search_users(assignee_name)
+        users = await self._search_users(assignee_name, tenant_id=tenant_id)
         if not users:
             return AssigneeResolution(
                 status="unavailable",
@@ -94,7 +94,7 @@ class AssigneeResolver:
                 email=link.get("board_user_email"),
             )
 
-        users = await self._search_users(None, limit=100)
+        users = await self._search_users(None, tenant_id=tenant_id, limit=100)
         candidates = [
             user
             for user in users
@@ -168,11 +168,28 @@ class AssigneeResolver:
             provider_user_id=provider_user_id,
         )
 
-    async def _search_users(self, query: str | None, *, limit: int = 20) -> list[dict[str, str | None]]:
+    async def _search_users(
+        self,
+        query: str | None,
+        *,
+        tenant_id: str | None,
+        project_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, str | None]]:
         if not self.board_tools or not hasattr(self.board_tools, "search_users"):
             return []
         try:
-            result = await self.board_tools.search_users(query=query, limit=limit)
+            result = await self.board_tools.search_users(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                query=query,
+                limit=limit,
+            )
+        except TypeError:
+            try:
+                result = await self.board_tools.search_users(query=query, limit=limit)
+            except Exception:
+                return []
         except Exception:
             return []
         return _extract_users(result)

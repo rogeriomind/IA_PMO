@@ -49,6 +49,7 @@ O arquivo `/opt/shared/mcp/board_pmo.md` e a fonte de verdade das tools do board
 
 Wrappers internos disponiveis:
 
+- `search_projects` (usado para resolver referencia textual de projeto quando o Board expuser `board_search_projects`)
 - `search_tasks`
 - `get_task`
 - `create_task`
@@ -60,6 +61,8 @@ Wrappers internos disponiveis:
 - `list_my_tasks`
 
 Eles chamam somente tools encontradas no markdown ou mapeadas explicitamente por `MCP_TOOL_MAP_JSON`. Se uma tool estiver ausente, a API retorna uma limitacao clara e nao executa fallback destrutivo.
+
+O contrato atual do Board MCP e tenant/project-aware. O V2 resolve `tenant_id` e `project_id` antes de executar ferramentas; `BoardTools` envia `tenantId`, `projectId`, `activityId` e `idempotencyKey` em camelCase no boundary MCP. Operacoes de projeto sem `project_id` sao bloqueadas antes da chamada ao Board.
 
 Exemplo de `MCP_TOOL_MAP_JSON`, se os nomes reais no markdown forem diferentes:
 
