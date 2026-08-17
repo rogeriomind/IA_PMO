@@ -168,7 +168,7 @@ class GetTaskArgs:
         return {
             "tenantId": self.tenant_id,
             "projectId": self.project_id,
-            "activityId": self.activity_id,
+            "id": self.activity_id,
         }
 
 
@@ -203,7 +203,7 @@ class UpdateTaskArgs:
             {
                 "tenantId": self.tenant_id,
                 "projectId": self.project_id,
-                "activityId": self.activity_id,
+                "id": self.activity_id,
                 "idempotencyKey": self.idempotency_key,
                 **normalize_write_payload(self.fields),
             }
@@ -223,7 +223,7 @@ class MoveTaskArgs:
             {
                 "tenantId": self.tenant_id,
                 "projectId": self.project_id,
-                "activityId": self.activity_id,
+                "id": self.activity_id,
                 "status": normalize_status(self.status),
                 "idempotencyKey": self.idempotency_key,
             }
@@ -243,7 +243,7 @@ class AddCommentArgs:
             {
                 "tenantId": self.tenant_id,
                 "projectId": self.project_id,
-                "activityId": self.activity_id,
+                "id": self.activity_id,
                 "message": self.comment,
                 "idempotencyKey": self.idempotency_key,
             }

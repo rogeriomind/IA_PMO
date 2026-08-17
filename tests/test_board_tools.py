@@ -86,7 +86,7 @@ async def test_update_task_normalizes_due_date_before_mcp_call():
     assert result == {
         "tenantId": "tenant-a",
         "projectId": "project-1",
-        "activityId": "TASK-1",
+        "id": "TASK-1",
         "idempotencyKey": "idem-2",
         "dueDate": "2026-07-04",
     }
@@ -114,10 +114,58 @@ async def test_update_task_normalizes_assignee_id_alias_to_board_field():
     assert result == {
         "tenantId": "tenant-a",
         "projectId": "project-1",
-        "activityId": "TASK-1",
+        "id": "TASK-1",
         "idempotencyKey": "idem-3",
         "assigneeId": "board-user-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_task_identity_calls_send_board_id_contract():
+    fake_client = FakeClient()
+    board_tools = BoardTools(fake_client)
+
+    await board_tools.get_task(tenant_id="tenant-a", project_id="project-1", activity_id="TASK-1")
+    await board_tools.move_task(
+        tenant_id="tenant-a",
+        project_id="project-1",
+        task_id="TASK-1",
+        status="em andamento",
+        idempotency_key="idem-4",
+    )
+    await board_tools.add_comment(
+        tenant_id="tenant-a",
+        project_id="project-1",
+        task_id="TASK-1",
+        comment="feito",
+        idempotency_key="idem-5",
+    )
+
+    assert fake_client.calls == [
+        ("get_task", {"tenantId": "tenant-a", "projectId": "project-1", "id": "TASK-1"}, True),
+        (
+            "move_task",
+            {
+                "tenantId": "tenant-a",
+                "projectId": "project-1",
+                "id": "TASK-1",
+                "status": "IN_PROGRESS",
+                "idempotencyKey": "idem-4",
+            },
+            False,
+        ),
+        (
+            "add_comment",
+            {
+                "tenantId": "tenant-a",
+                "projectId": "project-1",
+                "id": "TASK-1",
+                "message": "feito",
+                "idempotencyKey": "idem-5",
+            },
+            False,
+        ),
+    ]
 
 
 @pytest.mark.asyncio
